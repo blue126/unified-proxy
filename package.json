@@ -1,0 +1,30 @@
+{
+  "name": "unified-proxy",
+  "version": "5.0.0",
+  "description": "Multi-provider OAuth proxy - Anthropic Claude + OpenAI GPT via subscription",
+  "type": "module",
+  "main": "server.js",
+  "bin": {
+    "unified-proxy": "./server.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "./test.sh"
+  },
+  "keywords": [
+    "claude",
+    "anthropic",
+    "openai",
+    "proxy",
+    "api",
+    "oauth",
+    "unified-proxy"
+  ],
+  "author": "NYTEMODEONLY",
+  "license": "MIT",
+  "dependencies": {},
+  "engines": {
+    "node": ">=20"
+  }
+}
