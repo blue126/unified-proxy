@@ -452,7 +452,7 @@ function convertMessages(messages, tools) {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleAnthropicChat(req, res, body) {
-  const { model, messages, temperature, max_tokens, tools, stream } = body;
+  const { model, messages, temperature, max_tokens, tools, stream, thinking } = body;
   const mappedModel = resolveAnthropicModel(model);
   const { system, messages: anthropicMessages } = convertMessages(messages, tools);
   const hasTools = tools && tools.length > 0;
@@ -484,7 +484,12 @@ async function handleAnthropicChat(req, res, body) {
     messages: anthropicMessages,
     max_tokens: max_tokens || 8192,
   };
-  if (temperature !== undefined) requestBody.temperature = temperature;
+  // thinking requires temperature to be unset (Anthropic API restriction)
+  if (thinking) {
+    requestBody.thinking = thinking;
+  } else if (temperature !== undefined) {
+    requestBody.temperature = temperature;
+  }
 
   // For tool requests, use sync to ensure XML is filtered before sending
   if (stream && !hasTools) {
@@ -624,7 +629,7 @@ async function handleAnthropicChat(req, res, body) {
  * Returns { error, codexBody } — if error is set, caller should return 400.
  */
 function convertToCodexRequest(body) {
-  const { messages, model, tools, tool_choice, max_tokens, temperature, top_p, stop, n } = body;
+  const { messages, model, tools, tool_choice, max_tokens, temperature, top_p, stop, n, reasoning_effort } = body;
 
   // Reject unsupported parameters
   if (stop !== undefined) {
@@ -709,6 +714,7 @@ function convertToCodexRequest(body) {
   if (max_tokens !== undefined) codexBody.max_output_tokens = max_tokens;
   if (temperature !== undefined) codexBody.temperature = temperature;
   if (top_p !== undefined) codexBody.top_p = top_p;
+  if (reasoning_effort !== undefined) codexBody.reasoning = { effort: reasoning_effort };
 
   // Tools mapping
   if (tools && Array.isArray(tools) && tools.length > 0) {
