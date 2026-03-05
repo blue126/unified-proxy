@@ -1,0 +1,30 @@
+[Unit]
+Description=Unified Proxy - Multi-Provider OAuth Proxy (Anthropic + OpenAI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/unified-proxy
+ExecStart=/usr/bin/node /opt/unified-proxy/server.js
+EnvironmentFile=/opt/unified-proxy/.env
+Restart=always
+RestartSec=5
+StartLimitInterval=60s
+StartLimitBurst=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/unified-proxy
+LimitNOFILE=65536
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=unified-proxy
+
+[Install]
+WantedBy=multi-user.target

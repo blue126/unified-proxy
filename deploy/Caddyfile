@@ -1,0 +1,11 @@
+# 将 proxy.yourdomain.com 替换为实际子域名
+proxy.yourdomain.com {
+    reverse_proxy localhost:3456
+
+    header {
+        X-Frame-Options DENY
+        X-Content-Type-Options nosniff
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        -Server
+    }
+}
