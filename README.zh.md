@@ -94,13 +94,21 @@ curl https://your-proxy.example.com/v1/models \
 {
   "object": "list",
   "data": [
-    { "id": "claude-opus-4-6",   "object": "model", "owned_by": "anthropic" },
-    { "id": "claude-sonnet-4-6", "object": "model", "owned_by": "anthropic" },
-    { "id": "claude-opus-4-5",   "object": "model", "owned_by": "anthropic" },
-    { "id": "claude-sonnet-4-5", "object": "model", "owned_by": "anthropic" },
-    { "id": "claude-haiku-4-5",  "object": "model", "owned_by": "anthropic" },
-    { "id": "gpt-5.2",           "object": "model", "owned_by": "openai" },
-    { "id": "o3-pro",            "object": "model", "owned_by": "openai" }
+    { "id": "claude-opus-4-6",      "object": "model", "owned_by": "anthropic" },
+    { "id": "claude-sonnet-4-6",    "object": "model", "owned_by": "anthropic" },
+    { "id": "claude-opus-4-5",      "object": "model", "owned_by": "anthropic" },
+    { "id": "claude-sonnet-4-5",    "object": "model", "owned_by": "anthropic" },
+    { "id": "claude-haiku-4-5",     "object": "model", "owned_by": "anthropic" },
+    { "id": "codex-mini-latest",    "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.3-codex",        "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.3-codex-spark",  "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.2-codex",        "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.2",              "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.1-codex-max",    "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.1-codex",        "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.1-codex-mini",   "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5-codex",          "object": "model", "owned_by": "openai" },
+    { "id": "o3-pro",               "object": "model", "owned_by": "openai" }
   ]
 }
 ```
@@ -121,7 +129,7 @@ Content-Type: application/json
 
 | 模型前缀 | 路由目标 |
 |---|---|
-| `gpt-`、`o1`、`o3`、`o4` | OpenAI（ChatGPT Backend）|
+| `gpt-`、`o1`、`o3`、`o4`、`codex-` | OpenAI（ChatGPT Backend）|
 | 其他所有模型 | Anthropic（Claude API）|
 
 #### 非流式请求
@@ -223,6 +231,8 @@ print(response.choices[0].message.content)
         "claude-opus-4-6",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
+        "codex-mini-latest",
+        "gpt-5.3-codex",
         "gpt-5.2",
         "o3-pro"
       ],
