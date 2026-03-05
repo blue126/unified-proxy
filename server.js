@@ -723,9 +723,8 @@ function convertToCodexRequest(body) {
     stream: true,
   };
 
-  if (instructions.length > 0) {
-    codexBody.instructions = instructions.join('\n\n');
-  }
+  // instructions is required by the ChatGPT Backend even if empty
+  codexBody.instructions = instructions.length > 0 ? instructions.join('\n\n') : '';
   if (input.length > 0) {
     codexBody.input = input;
   }
