@@ -474,13 +474,25 @@ async function handleAnthropicChat(req, res, body) {
     'Authorization': `Bearer ${tokens.accessToken}`,
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
-    'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14',
+    'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-2024-07-31',
     'user-agent': 'claude-cli/2.1.2 (external, cli)',
   };
 
+  // Enable prompt caching: wrap system as array with cache_control
+  const systemWithCache = [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }];
+
+  // Mark last historical message (second-to-last overall) as a cache breakpoint
+  // so repeated conversation prefixes are cached across multi-turn requests
+  if (anthropicMessages.length > 1) {
+    const lastHistory = anthropicMessages[anthropicMessages.length - 2];
+    if (typeof lastHistory.content === 'string') {
+      lastHistory.content = [{ type: 'text', text: lastHistory.content, cache_control: { type: 'ephemeral' } }];
+    }
+  }
+
   const requestBody = {
     model: mappedModel,
-    system: system,
+    system: systemWithCache,
     messages: anthropicMessages,
     max_tokens: max_tokens || 8192,
   };
