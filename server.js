@@ -22,6 +22,7 @@ import { createInterface } from 'node:readline';
 const PORT = process.env.PORT || 3456;
 const HOST = process.env.HOST || '127.0.0.1';
 const VERSION = '5.0.0';
+const PROXY_API_KEY = process.env.PROXY_API_KEY || null;
 
 // ─── Anthropic OAuth ───
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -1095,6 +1096,15 @@ async function handleRequest(req, res) {
   if (method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' });
     return res.end();
+  }
+
+  // API Key auth (skip for /health and /; no-op if PROXY_API_KEY unset)
+  if (PROXY_API_KEY && path !== '/health' && path !== '/') {
+    const authHeader = req.headers['authorization'] || '';
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    if (token !== PROXY_API_KEY) {
+      return sendJSON(res, 401, { error: { message: 'Unauthorized: invalid or missing API key', type: 'auth_error' } });
+    }
   }
 
   // Health check — show status of both providers
