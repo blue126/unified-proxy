@@ -161,9 +161,8 @@ PROXY_API_KEY={{ vault_proxy_api_key }}
 - name: Deploy unified-proxy to OCI VM
   hosts: proxy
   become: true
-  vars_files:
-    - group_vars/proxy/vars.yml
-    - group_vars/proxy/vault.yml
+  # vars_files 不需要：Ansible 会根据主机组自动加载 group_vars/proxy/ 下的所有文件
+  # （包括 vault.yml，运行时传 --ask-vault-pass 即可）
 
   handlers:
     - import_tasks: handlers/main.yml
@@ -269,6 +268,7 @@ PROXY_API_KEY={{ vault_proxy_api_key }}
         depth: 1
         force: true
       become_user: ubuntu
+      tags: [code]
 
     - name: Copy server.js from repo
       copy:
@@ -279,6 +279,7 @@ PROXY_API_KEY={{ vault_proxy_api_key }}
         group: ubuntu
         mode: "0644"
       notify: restart unified-proxy
+      tags: [code]
 
     - name: Copy package.json from repo
       copy:
@@ -288,6 +289,9 @@ PROXY_API_KEY={{ vault_proxy_api_key }}
         owner: ubuntu
         group: ubuntu
         mode: "0644"
+      tags: [code]
+
+    # 注意：package.json 的 dependencies 为空，无需执行 npm install
 
     - name: Clean up temporary clone directory
       file:
@@ -489,7 +493,7 @@ ansible-playbook deploy-unified-proxy.yml -i inventory/hosts.yml \
   --ask-vault-pass --tags code
 ```
 
-> 为此，在 `Clone / update`、`Copy server.js`、`Copy package.json` 三个 task 上加 `tags: [code]` 即可。
+> `Clone / update`、`Copy server.js`、`Copy package.json` 三个 task 均已标注 `tags: [code]`，开箱即用。
 
 ---
 
