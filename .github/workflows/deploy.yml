@@ -1,0 +1,64 @@
+name: Deploy to OCI VM
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e
+
+            TMPDIR=$(mktemp -d)
+            INSTALL_DIR=/opt/unified-proxy
+
+            # Clone latest code
+            git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMPDIR"
+
+            # Copy application files
+            cp "$TMPDIR/server.js"    "$INSTALL_DIR/server.js"
+            cp "$TMPDIR/package.json" "$INSTALL_DIR/package.json"
+
+            # Cleanup
+            rm -rf "$TMPDIR"
+
+            # Reload systemd and restart service
+            sudo systemctl daemon-reload
+            sudo systemctl restart unified-proxy
+
+            # Verify service is running
+            sleep 2
+            sudo systemctl is-active --quiet unified-proxy \
+              && echo "Service restarted successfully" \
+              || (echo "ERROR: service failed to start"; sudo journalctl -u unified-proxy -n 30 --no-pager; exit 1)
+
+      - name: Smoke test
+        env:
+          PROXY_DOMAIN: ${{ secrets.PROXY_DOMAIN }}
+          PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
+        run: |
+          BASE="https://${PROXY_DOMAIN}"
+
+          echo "--- Health check ---"
+          STATUS=$(curl -sf "${BASE}/health" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['status'])")
+          echo "status: $STATUS"
+          [ "$STATUS" = "ok" ] || [ "$STATUS" = "degraded" ] || (echo "Health check failed"; exit 1)
+
+          echo "--- Models list ---"
+          COUNT=$(curl -sf "${BASE}/v1/models" \
+            -H "Authorization: Bearer ${PROXY_API_KEY}" \
+            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))")
+          echo "models available: $COUNT"
+          [ "$COUNT" -gt 0 ] || (echo "No models returned"; exit 1)
+
+          echo "Smoke test passed"
