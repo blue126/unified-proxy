@@ -162,6 +162,8 @@ curl -N https://your-proxy.example.com/v1/chat/completions \
 
 > **注意：** ChatGPT Backend 要求请求中必须包含 `system` message，否则会报错 `{"detail":"Instructions are required"}`。
 
+> **注意：** ChatGPT Backend **不支持** `temperature` 和 `top_p` 参数。代理会自动丢弃这两个字段，不会报错。如需控制输出质量，请改用 `reasoning_effort`。
+
 ```bash
 curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \

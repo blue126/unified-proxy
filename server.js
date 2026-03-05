@@ -649,7 +649,7 @@ async function handleAnthropicChat(req, res, body) {
  * Returns { error, codexBody } — if error is set, caller should return 400.
  */
 function convertToCodexRequest(body) {
-  const { messages, model, tools, tool_choice, max_tokens, temperature, top_p, stop, n, reasoning_effort } = body;
+  const { messages, model, tools, tool_choice, max_tokens, stop, n, reasoning_effort } = body;
 
   // Reject unsupported parameters
   if (stop !== undefined) {
@@ -731,8 +731,7 @@ function convertToCodexRequest(body) {
 
   // Sampling parameters
   if (max_tokens !== undefined) codexBody.max_output_tokens = max_tokens;
-  if (temperature !== undefined) codexBody.temperature = temperature;
-  if (top_p !== undefined) codexBody.top_p = top_p;
+  // temperature and top_p are not supported by the Codex Responses API — drop them
   if (reasoning_effort !== undefined) codexBody.reasoning = { effort: reasoning_effort };
 
   // Tools mapping
