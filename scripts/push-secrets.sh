@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 将 .env.secrets 中的值同步到 GitHub Actions secrets
-# 用法：./scripts/push-secrets.sh
+# Sync .env.secrets to GitHub Actions secrets
+# Usage: ./scripts/push-secrets.sh
 
 set -euo pipefail
 
-SECRETS_FILE="$(dirname "$0")/../.env.secrets"
+SECRETS_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env.secrets"
 
 if [ ! -f "$SECRETS_FILE" ]; then
   echo "Error: .env.secrets not found."
@@ -12,24 +12,29 @@ if [ ! -f "$SECRETS_FILE" ]; then
   exit 1
 fi
 
-# Load variables from .env.secrets (ignore comments and blank lines)
-set -o allexport
-# shellcheck disable=SC1090
-source <(grep -v '^\s*#' "$SECRETS_FILE" | grep -v '^\s*$' | sed 's/ *#.*//')
-set +o allexport
+# Read a value from .env.secrets by key name
+get_val() {
+  grep "^${1}=" "$SECRETS_FILE" | head -1 | cut -d= -f2- | sed 's/#.*//' | sed 's/[[:space:]]*$//'
+}
 
-echo "Pushing secrets to GitHub..."
+OCI_HOST=$(get_val OCI_HOST)
+OCI_USER=$(get_val OCI_USER)
+OCI_SSH_KEY_FILE=$(get_val OCI_SSH_KEY_FILE)
+PROXY_DOMAIN=$(get_val PROXY_DOMAIN)
+PROXY_API_KEY=$(get_val PROXY_API_KEY)
 
-# OCI_SSH_KEY: read from file path, not the path itself
-if [ -z "${OCI_SSH_KEY_FILE:-}" ]; then
-  echo "Error: OCI_SSH_KEY_FILE is not set in .env.secrets"
-  exit 1
-fi
+for var in OCI_HOST OCI_USER OCI_SSH_KEY_FILE PROXY_DOMAIN PROXY_API_KEY; do
+  [ -n "${!var}" ] || { echo "Error: $var is not set in .env.secrets"; exit 1; }
+done
+
+# Expand leading tilde in the key file path
 SSH_KEY_FILE="${OCI_SSH_KEY_FILE/#\~/$HOME}"
 if [ ! -f "$SSH_KEY_FILE" ]; then
   echo "Error: SSH key file not found: $SSH_KEY_FILE"
   exit 1
 fi
+
+echo "Pushing secrets to GitHub..."
 
 gh secret set OCI_HOST      --body "$OCI_HOST"
 gh secret set OCI_USER      --body "$OCI_USER"

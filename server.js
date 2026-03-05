@@ -59,8 +59,12 @@ const ANTHROPIC_MODEL_MAP = {
   'haiku': 'claude-3-5-haiku-20241022',
 };
 
-// ─── Model Lists for /v1/models ───
-const ANTHROPIC_MODELS = [
+// ─── Default model + models config file ───
+const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
+const MODELS_FILE = process.env.PROXY_MODELS_FILE || join(homedir(), '.unified-proxy', 'models.json');
+
+// ─── Model Lists for /v1/models (defaults; override via models.json) ───
+const DEFAULT_ANTHROPIC_MODELS = [
   { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
   { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
@@ -68,7 +72,7 @@ const ANTHROPIC_MODELS = [
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ];
 
-const OPENAI_MODELS = [
+const DEFAULT_OPENAI_MODELS = [
   { id: 'gpt-5.2', name: 'GPT-5.2' },
   { id: 'o3-pro', name: 'o3 Pro' },
 ];
@@ -105,6 +109,24 @@ function resolveAnthropicModel(model) {
   const bare = stripPrefix(model);
   return ANTHROPIC_MODEL_MAP[model] || ANTHROPIC_MODEL_MAP[bare] || bare;
 }
+
+function loadModels() {
+  try {
+    if (existsSync(MODELS_FILE)) {
+      const data = JSON.parse(readFileSync(MODELS_FILE, 'utf8'));
+      console.log(`[MODELS] Loaded ${data.length} models from ${MODELS_FILE}`);
+      return {
+        anthropic: data.filter(m => routeRequest(m.id) === 'anthropic'),
+        openai:    data.filter(m => routeRequest(m.id) === 'openai'),
+      };
+    }
+  } catch (e) {
+    console.error(`[MODELS] Error loading ${MODELS_FILE}: ${e.message}, using defaults`);
+  }
+  return { anthropic: DEFAULT_ANTHROPIC_MODELS, openai: DEFAULT_OPENAI_MODELS };
+}
+
+const { anthropic: ANTHROPIC_MODELS, openai: OPENAI_MODELS } = loadModels();
 
 // ═══════════════════════════════════════════════════════════════
 // §2  Auth File Management (dual-section)
@@ -1149,6 +1171,7 @@ async function handleRequest(req, res) {
     try {
       const body = await parseBody(req);
       if (!body.messages) return sendJSON(res, 400, { error: { message: 'messages required' } });
+      if (!body.model) body.model = DEFAULT_MODEL;
 
       const provider = routeRequest(body.model);
       if (provider === 'openai') {
