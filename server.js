@@ -223,6 +223,18 @@ function loadTokensForProvider(provider) {
     }
   }
 
+  // OpenAI-specific fallbacks (env vars)
+  if (provider === 'openai') {
+    const envToken = process.env.OPENAI_ACCESS_TOKEN;
+    if (envToken) {
+      return {
+        accessToken: envToken,
+        accountId: process.env.OPENAI_ACCOUNT_ID || null,
+        expiresAt: Date.now() + 86400000,
+      };
+    }
+  }
+
   return null;
 }
 

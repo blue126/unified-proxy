@@ -152,13 +152,18 @@ curl -N https://your-proxy.example.com/v1/chat/completions \
 
 #### OpenAI model example
 
+> **Note:** The ChatGPT Backend requires a `system` message. Requests without one will fail with `{"detail":"Instructions are required"}`.
+
 ```bash
 curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "o3-pro",
-    "messages": [{"role": "user", "content": "Explain quantum entanglement."}],
+    "messages": [
+      {"role": "system", "content": "You are a helpful assistant."},
+      {"role": "user", "content": "Explain quantum entanglement."}
+    ],
     "stream": false
   }'
 ```
@@ -206,6 +211,41 @@ print(response.choices[0].message.content)
 
 Set the OpenAI API base URL to `https://your-proxy.example.com/v1` and API key to your `PROXY_API_KEY`.
 
+### Opencode
+
+[Opencode](https://opencode.ai) is a terminal-based AI coding assistant that supports OpenAI-compatible providers. To point it at this proxy, add a provider entry to `~/.config/opencode/config.json`:
+
+```json
+{
+  "provider": {
+    "unified-proxy": {
+      "name": "Unified Proxy",
+      "api": "openai",
+      "models": [
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5",
+        "gpt-5.2",
+        "o3-pro"
+      ],
+      "apiKey": "<your PROXY_API_KEY>",
+      "baseURL": "https://your-proxy.example.com/v1"
+    }
+  }
+}
+```
+
+Replace `<your PROXY_API_KEY>` and `https://your-proxy.example.com/v1` with your actual values.
+
+After saving the config, select the provider in Opencode:
+
+```bash
+opencode
+# Press 'p' to open provider selection, then choose "Unified Proxy"
+```
+
+You can use any model listed under `models`. The model name is passed through to this proxy, which routes it to the correct upstream provider automatically.
+
 ---
 
 ## Configuration
@@ -218,6 +258,9 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 | `HOST` | `127.0.0.1` | Listen address |
 | `PROXY_API_KEY` | _(none)_ | API key for all non-health endpoints. **If unset, auth is disabled** (fine for local use). |
 | `PROXY_AUTH_FILE` | `~/.unified-proxy/auth.json` | Path to OAuth token storage |
+| `CLAUDE_ACCESS_TOKEN` | _(none)_ | Fallback Anthropic access token. Used if no token is found in `auth.json` or the system Keychain. |
+| `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback OpenAI access token. Used if no token is found in `auth.json`. Must be paired with `OPENAI_ACCOUNT_ID`. |
+| `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID, required when using `OPENAI_ACCESS_TOKEN`. |
 
 ---
 
@@ -261,9 +304,15 @@ The proxy runs as a systemd service behind Caddy for TLS termination.
 
 The OCI VM is a headless server — `--login` cannot open a browser there. Log in on your local Mac first, then copy the token file to the server:
 
+> [!WARNING]
+> Do not run the local server and the OCI server simultaneously with the same `auth.json`. Both providers use single-use rolling refresh tokens — whichever instance refreshes first invalidates the other's token, causing `invalid_grant` errors. **Stop the local server immediately after `--login` and before uploading.**
+
 ```bash
 # On your local Mac
 node server.js --login all
+
+# Stop the local server before uploading (see warning above)
+pkill -f "node server.js" 2>/dev/null; true
 
 # Upload the token file to the server
 scp ~/.unified-proxy/auth.json ubuntu@<oci-ip>:/opt/unified-proxy/auth.json
@@ -279,7 +328,13 @@ ssh ubuntu@<oci-ip> "sudo systemctl restart unified-proxy"
 
 ### Token renewal
 
-When tokens expire, repeat the same process:
+**In normal operation you don't need to do anything.** The proxy auto-refreshes access tokens in the background (checked every 30 minutes, renewed 2 hours before expiry). Both Anthropic and OpenAI use rolling refresh tokens — each refresh issues a new refresh token, effectively resetting the expiry window. As long as the server runs continuously, tokens never actually expire.
+
+Manual re-login is only needed if:
+- The server was **offline for 30+ consecutive days** (refresh token expired without being rotated), or
+- The token was **explicitly revoked** (e.g. you signed out of claude.ai or ChatGPT on all devices).
+
+When that happens, repeat the first-time setup:
 
 ```bash
 # Re-login on your local Mac
@@ -375,11 +430,34 @@ node server.js
 # Auto-reload
 npm run dev
 
-# Run tests (requires a running local server)
+# Unit + integration tests (no real tokens needed — spins up isolated test server)
+npm test
+
+# Integration smoke test against local server (no auth)
 ./test.sh
+
+# Integration smoke test with auth
+PROXY_API_KEY=xxx ./test.sh
+
+# Integration smoke test against remote server
+BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx ./test.sh
 ```
 
 `PROXY_API_KEY` is not required locally — the proxy runs without authentication when the variable is unset.
+
+### Live smoke test (real inference)
+
+Verifies the deployed proxy can actually reach upstream models end-to-end:
+
+```bash
+# Reads BASE_URL and PROXY_API_KEY from .env.secrets automatically
+npm run smoke
+
+# Or override explicitly
+BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx npm run smoke
+```
+
+Calls `claude-sonnet-4-6` and `gpt-5.2` with a real prompt and verifies a non-empty response is returned.
 
 ---
 

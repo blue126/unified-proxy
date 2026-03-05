@@ -10,7 +10,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "./test.sh"
+    "test": "node --test test/server.test.js",
+    "test:integration": "./test.sh",
+    "smoke": "./scripts/smoke.sh"
   },
   "keywords": [
     "claude",
