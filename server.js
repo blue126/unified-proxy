@@ -73,7 +73,15 @@ const DEFAULT_ANTHROPIC_MODELS = [
 ];
 
 const DEFAULT_OPENAI_MODELS = [
+  { id: 'codex-mini-latest', name: 'Codex Mini (latest)' },
+  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
+  { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
+  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
   { id: 'gpt-5.2', name: 'GPT-5.2' },
+  { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max' },
+  { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
+  { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
+  { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
   { id: 'o3-pro', name: 'o3 Pro' },
 ];
 
@@ -97,7 +105,7 @@ let tokenExpiry = { anthropic: 0, openai: 0 };
 
 function routeRequest(model) {
   const bare = stripPrefix(model);
-  if (/^(gpt-|o1|o3|o4)/.test(bare)) return 'openai';
+  if (/^(gpt-|o1|o3|o4|codex-)/.test(bare)) return 'openai';
   return 'anthropic';
 }
 
@@ -1473,7 +1481,7 @@ if (loginIdx !== -1) {
 ║  Tokens:                                                      ║
 ║${statusLines[0].padEnd(63)}║
 ║${statusLines[1].padEnd(63)}║
-║  Routing: gpt-*/o1*/o3*/o4* → OpenAI, others → Anthropic     ║
+║  Routing: gpt-*/o1*/o3*/o4*/codex-* → OpenAI, others → Anthropic     ║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
   });
