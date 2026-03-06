@@ -178,6 +178,34 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
+#### Prompt 缓存
+
+代理会自动为两个 provider 启用 prompt 缓存：
+
+**Anthropic（Claude）：** 自动在 system prompt 和最后一条用户消息上添加 `cache_control: {type: "ephemeral"}` 标记，遵循 [Anthropic 的 prompt caching 协议](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)。缓存前缀需至少 1024 tokens，TTL 为 5 分钟。
+
+**OpenAI（ChatGPT Backend）：** 根据 system prompt 内容生成确定性的 session ID，同时作为 `prompt_cache_key`（请求体）和 `session_id`（请求头）发送，与 Codex CLI 的缓存协议一致。相同 system prompt 的请求共享同一个缓存 key，后端可复用已计算的前缀 tokens。
+
+缓存命中统计会透传到响应的 `usage` 对象中：
+
+```json
+"usage": {
+    "prompt_tokens": 1475,
+    "completion_tokens": 42,
+    "total_tokens": 1517,
+    "prompt_tokens_details": {
+        "cached_tokens": 1280
+    },
+    "completion_tokens_details": {
+        "reasoning_tokens": 0
+    }
+}
+```
+
+> **注意：** OpenAI prompt 缓存要求至少 1024 prompt tokens，更短的 prompt 不会被缓存。对于共享 system prompt 的批量任务（如 PDFMathTranslate 批量翻译）效果尤为显著。
+
+---
+
 #### 模型别名（Anthropic）
 
 | 别名 | 实际模型 |

@@ -241,6 +241,34 @@ curl https://your-proxy.example.com/v1/chat/completions \
 
 ---
 
+#### Prompt Caching
+
+The proxy automatically enables prompt caching for both providers:
+
+**Anthropic (Claude):** Adds `cache_control: {type: "ephemeral"}` markers to the system prompt and last user message, following [Anthropic's prompt caching protocol](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching). Requires at least 1024 tokens in the cached prefix. Cache TTL is 5 minutes.
+
+**OpenAI (ChatGPT Backend):** Derives a deterministic session ID from the system prompt content and sends it as both `prompt_cache_key` (request body) and `session_id` (header), matching the Codex CLI caching protocol. Requests with the same system prompt share a cache key, so the backend can reuse previously computed prefix tokens.
+
+Cache hit statistics are transparently passed through in the response `usage` object:
+
+```json
+"usage": {
+    "prompt_tokens": 1475,
+    "completion_tokens": 42,
+    "total_tokens": 1517,
+    "prompt_tokens_details": {
+        "cached_tokens": 1280
+    },
+    "completion_tokens_details": {
+        "reasoning_tokens": 0
+    }
+}
+```
+
+> **Note:** OpenAI prompt caching requires at least 1024 prompt tokens. Shorter prompts will not be cached. Caching is especially beneficial for batch workloads with a shared system prompt (e.g., PDFMathTranslate, bulk translation).
+
+---
+
 #### Model aliases
 
 Short aliases are supported for Anthropic models:
