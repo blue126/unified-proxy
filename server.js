@@ -729,6 +729,19 @@ function convertToCodexRequest(body) {
     codexBody.input = input;
   }
 
+  // Prompt caching: derive a deterministic session ID from instructions content.
+  // Same instructions → same session ID → ChatGPT Backend can reuse cached prefix.
+  const hash = createHash('sha256').update(codexBody.instructions).digest('hex');
+  // Format as UUID v4 (set version=4 nibble and variant bits)
+  const sessionId = [
+    hash.slice(0, 8),
+    hash.slice(8, 12),
+    '4' + hash.slice(13, 16),           // version 4
+    ((parseInt(hash[16], 16) & 0x3) | 0x8).toString(16) + hash.slice(17, 20), // variant 10xx
+    hash.slice(20, 32),
+  ].join('-');
+  codexBody.prompt_cache_key = sessionId;
+
   // Sampling parameters
   if (max_tokens !== undefined) codexBody.max_output_tokens = max_tokens;
   // temperature and top_p are not supported by the Codex Responses API — drop them
@@ -939,7 +952,7 @@ async function handleOpenAIChat(req, res, body) {
     return sendJSON(res, 400, { error: convError });
   }
 
-  console.log(`[OPENAI] → ChatGPT Backend: model=${codexBody.model}, input=${codexBody.input?.length || 0}, tools=${codexBody.tools?.length || 0}`);
+  console.log(`[OPENAI] → ChatGPT Backend: model=${codexBody.model}, input=${codexBody.input?.length || 0}, tools=${codexBody.tools?.length || 0}, cache_key=${codexBody.prompt_cache_key}`);
 
   // 4. Make upstream request (with 401 retry)
   const makeUpstreamRequest = async (tok) => {
@@ -955,6 +968,7 @@ async function handleOpenAIChat(req, res, body) {
         'chatgpt-account-id': tok.accountId,
         'openai-beta': 'responses=experimental',
         'originator': 'codex_cli_rs',
+        'session_id': codexBody.prompt_cache_key,
         'user-agent': CODEX_CLI_UA,
         'version': CODEX_CLI_VERSION,
       },
