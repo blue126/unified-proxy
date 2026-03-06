@@ -178,13 +178,13 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
-#### 推理 / Thinking 参数
+#### Reasoning / Thinking Parameters
 
-##### Claude 扩展思考（Anthropic 模型）
+##### Claude Extended Thinking (Anthropic models)
 
-Claude 支持在回答前进行深度思考（Extended Thinking）。开启后，模型会先在内部推理，再给出最终答案。思考过程不会出现在返回内容里，对客户端透明。
+Claude supports deep thinking before answering (Extended Thinking). When enabled, the model reasons internally before producing the final answer. The thinking process is not included in the response content and is transparent to the client.
 
-**开启方式**：在请求体中传入 `thinking` 字段：
+**Usage:** Pass the `thinking` field in the request body:
 
 ```bash
 curl https://your-proxy.example.com/v1/chat/completions \
@@ -192,7 +192,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-sonnet-4-6",
-    "messages": [{"role": "user", "content": "请帮我分析这道算法题的最优解..."}],
+    "messages": [{"role": "user", "content": "Analyze the optimal solution for this algorithm problem..."}],
     "thinking": {
       "type": "enabled",
       "budget_tokens": 10000
@@ -200,22 +200,22 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
-| 字段 | 说明 |
+| Field | Description |
 |---|---|
-| `thinking.type` | 固定填 `"enabled"` |
-| `thinking.budget_tokens` | 允许思考消耗的最多 token 数，建议 5000–16000 |
+| `thinking.type` | Must be `"enabled"` |
+| `thinking.budget_tokens` | Maximum tokens the model can spend on thinking. Recommended: 5000–16000 |
 
-> **注意**：开启 `thinking` 时不能同时设置 `temperature`（两者不兼容，Anthropic API 会报错）。代理会自动处理这个冲突——有 `thinking` 时忽略 `temperature`。
+> **Note:** `thinking` and `temperature` are mutually exclusive (Anthropic API restriction). The proxy handles this automatically — when `thinking` is present, `temperature` is ignored.
 
-> **适用模型**：claude-sonnet-4-6、claude-opus-4-6 等支持扩展思考的模型。haiku 系列不支持。
+> **Supported models:** claude-sonnet-4-6, claude-opus-4-6, and other models that support Extended Thinking. The haiku series does not support it.
 
 ---
 
-##### OpenAI 推理强度（OpenAI 模型）
+##### OpenAI Reasoning Effort (OpenAI models)
 
-o-series（o1/o3/o4）和 gpt-5.x 模型内置了推理能力，可以通过 `reasoning_effort` 控制推理的深度，在速度和质量之间权衡。
+o-series (o1/o3/o4) and gpt-5.x models have built-in reasoning capabilities. Use `reasoning_effort` to control the depth of reasoning, trading off between speed and quality.
 
-**使用方式**：在请求体中传入 `reasoning_effort` 字段：
+**Usage:** Pass the `reasoning_effort` field in the request body:
 
 ```bash
 curl https://your-proxy.example.com/v1/chat/completions \
@@ -231,13 +231,13 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
-| 值 | 说明 |
+| Value | Description |
 |---|---|
-| `"low"` | 快速响应，推理较浅，适合简单任务 |
-| `"medium"` | 默认值，均衡速度与质量 |
-| `"high"` | 深度推理，耗时更长，适合复杂问题 |
+| `"low"` | Fast response, shallow reasoning, suitable for simple tasks |
+| `"medium"` | Default, balances speed and quality |
+| `"high"` | Deep reasoning, slower, suitable for complex problems |
 
-> **不传时的行为**：不传 `reasoning_effort` 则使用后端默认（通常是 medium）。对于 o/gpt-5.x 系列，推理是始终开启的，该参数只控制推理深度。
+> **Default behavior:** If `reasoning_effort` is not provided, the backend default is used (typically medium). For o-series/gpt-5.x models, reasoning is always enabled — this parameter only controls reasoning depth.
 
 ---
 
