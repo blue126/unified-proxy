@@ -649,7 +649,7 @@ async function handleAnthropicChat(req, res, body) {
  * Returns { error, codexBody } — if error is set, caller should return 400.
  */
 function convertToCodexRequest(body) {
-  const { messages, model, tools, tool_choice, max_tokens, stop, n, reasoning_effort } = body;
+  const { messages, model, tools, tool_choice, stop, n, reasoning_effort } = body;
 
   // Reject unsupported parameters
   if (stop !== undefined) {
@@ -742,9 +742,8 @@ function convertToCodexRequest(body) {
   ].join('-');
   codexBody.prompt_cache_key = sessionId;
 
-  // Sampling parameters
-  if (max_tokens !== undefined) codexBody.max_output_tokens = max_tokens;
-  // temperature and top_p are not supported by the Codex Responses API — drop them
+  // Sampling parameters — temperature, top_p, and max_tokens are not supported
+  // by the ChatGPT Backend Codex Responses API and are silently dropped.
   if (reasoning_effort !== undefined) codexBody.reasoning = { effort: reasoning_effort };
 
   // Tools mapping
@@ -895,12 +894,17 @@ class CodexSSETransformer {
           }
         }
 
-        // Extract usage
+        // Extract usage — preserve prompt_tokens_details/completion_tokens_details for caching visibility
         const respUsage = event.response?.usage;
         if (respUsage) {
           const prompt_tokens = respUsage.input_tokens ?? respUsage.prompt_tokens ?? 0;
           const completion_tokens = respUsage.output_tokens ?? respUsage.completion_tokens ?? 0;
           this.usage = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens };
+          if (respUsage.prompt_tokens_details) this.usage.prompt_tokens_details = respUsage.prompt_tokens_details;
+          if (respUsage.completion_tokens_details) this.usage.completion_tokens_details = respUsage.completion_tokens_details;
+          // Also check Responses API field names (input_tokens_details / output_tokens_details)
+          if (respUsage.input_tokens_details) this.usage.prompt_tokens_details = { cached_tokens: respUsage.input_tokens_details.cached_tokens ?? 0 };
+          if (respUsage.output_tokens_details) this.usage.completion_tokens_details = { reasoning_tokens: respUsage.output_tokens_details.reasoning_tokens ?? 0 };
         } else {
           this.usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
         }

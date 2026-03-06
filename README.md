@@ -162,7 +162,7 @@ curl -N https://your-proxy.example.com/v1/chat/completions \
 
 > **Note:** The ChatGPT Backend requires a `system` message. Requests without one will fail with `{"detail":"Instructions are required"}`.
 
-> **Note:** The ChatGPT Backend does **not** support `temperature` or `top_p`. These parameters are silently dropped for all OpenAI-routed requests. Use `reasoning_effort` to control output quality instead.
+> **Note:** The ChatGPT Backend does **not** support `temperature`, `top_p`, or `max_tokens`. These parameters are silently dropped for all OpenAI-routed requests. Use `reasoning_effort` to control output quality instead.
 
 ```bash
 curl https://your-proxy.example.com/v1/chat/completions \
