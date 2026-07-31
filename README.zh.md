@@ -99,19 +99,14 @@ curl https://your-proxy.example.com/v1/models \
     { "id": "claude-opus-4-5",      "object": "model", "owned_by": "anthropic" },
     { "id": "claude-sonnet-4-5",    "object": "model", "owned_by": "anthropic" },
     { "id": "claude-haiku-4-5",     "object": "model", "owned_by": "anthropic" },
-    { "id": "codex-mini-latest",    "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.3-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.3-codex-spark",  "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.2-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.2",              "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex-max",    "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex-mini",   "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5-codex",          "object": "model", "owned_by": "openai" },
-    { "id": "o3-pro",               "object": "model", "owned_by": "openai" }
+    { "id": "gpt-5.5",              "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.4",              "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.4-mini",         "object": "model", "owned_by": "openai" }
   ]
 }
 ```
+
+> 列表中 OpenAI 的部分是**实时从 ChatGPT 后端拉取**并缓存 1 小时的，反映你的账号当前真正可用的模型。OpenAI 会在不通知的情况下下架模型 slug，所以上面的具体 id 会随时间变化 —— 请查询该接口，不要硬编码。
 
 ---
 
@@ -169,7 +164,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "o3-pro",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "解释量子纠缠。"}
@@ -222,7 +217,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "o3-pro",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "请逐步解决这道数学题..."}
@@ -324,10 +319,8 @@ print(response.choices[0].message.content)
         "claude-opus-4-6",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
-        "codex-mini-latest",
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "o3-pro"
+        "gpt-5.5",
+        "gpt-5.4"
       ],
       "apiKey": "<你的 PROXY_API_KEY>",
       "baseURL": "https://your-proxy.example.com/v1"
@@ -360,8 +353,9 @@ opencode
 | `PROXY_API_KEY` | _（空）_ | API Key 鉴权。**不设置则不启用鉴权**（适合本地开发）。 |
 | `PROXY_AUTH_FILE` | `~/.unified-proxy/auth.json` | OAuth Token 存储路径 |
 | `CLAUDE_ACCESS_TOKEN` | _（空）_ | Anthropic 兜底 access token。在 `auth.json` 和系统 Keychain 均未找到 token 时使用。 |
-| `OPENAI_ACCESS_TOKEN` | _（空）_ | OpenAI 兜底 access token。在 `auth.json` 未找到 token 时使用，需配合 `OPENAI_ACCOUNT_ID`。 |
-| `OPENAI_ACCOUNT_ID` | _（空）_ | ChatGPT account ID，使用 `OPENAI_ACCESS_TOKEN` 时必填。 |
+| `OPENAI_ACCESS_TOKEN` | _（空）_ | OpenAI 兜底 access token。在 `auth.json` 未找到 token 时使用。 |
+| `OPENAI_ACCOUNT_ID` | _（空）_ | ChatGPT account ID。可选 —— ChatGPT 后端不强制要求该 header。 |
+| `CODEX_CLI_VERSION` | `0.150.0` | 上报给 ChatGPT 后端的 Codex CLI 版本号。它决定后端愿意提供哪些模型：新模型在此值提升前会被拒绝并提示 "requires a newer version of Codex"。 |
 
 ---
 
@@ -558,7 +552,7 @@ npm run smoke
 BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx npm run smoke
 ```
 
-会分别向 `claude-sonnet-4-6` 和 `gpt-5.2` 发送真实请求，验证返回了非空内容。
+通过 `/v1/models` 各取一个当前可用的模型，发送真实请求并验证返回了非空内容。模型 id 在运行时解析而非硬编码，因此上游下架某个 slug 时脚本不会随之失效。可用 `SMOKE_ANTHROPIC_MODEL` / `SMOKE_OPENAI_MODEL` 指定特定模型。
 
 ---
 

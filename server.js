@@ -35,8 +35,13 @@ const OPENAI_CHATGPT_BACKEND_URL = 'https://chatgpt.com/backend-api/codex/respon
 const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 
 // ─── Codex CLI impersonation (required by ChatGPT Backend) ───
-const CODEX_CLI_VERSION = '0.104.0';
+// The version we report gates which models the backend will serve us: newer models
+// are rejected with "requires a newer version of Codex" until this is bumped.
+// Override via env when a new model lands before this default catches up.
+const CODEX_CLI_VERSION = process.env.CODEX_CLI_VERSION || '0.150.0';
 const CODEX_CLI_UA = `codex_cli_rs/${CODEX_CLI_VERSION}`;
+// Authoritative, version-gated model catalog for the signed-in account.
+const OPENAI_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models';
 const OPENAI_AUTH_URL = 'https://auth.openai.com/oauth/authorize';
 const OPENAI_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const OPENAI_REDIRECT_URI = 'http://localhost:1455/auth/callback';
@@ -72,17 +77,13 @@ const DEFAULT_ANTHROPIC_MODELS = [
   { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
 ];
 
+// Last-resort fallback only. The live catalog is fetched from the ChatGPT backend
+// (see fetchOpenAIModels) because OpenAI retires these slugs without notice — a
+// hardcoded list silently rots into "model is not supported" errors.
 const DEFAULT_OPENAI_MODELS = [
-  { id: 'codex-mini-latest', name: 'Codex Mini (latest)' },
-  { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' },
-  { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark' },
-  { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex' },
-  { id: 'gpt-5.2', name: 'GPT-5.2' },
-  { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max' },
-  { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex' },
-  { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini' },
-  { id: 'gpt-5-codex', name: 'GPT-5 Codex' },
-  { id: 'o3-pro', name: 'o3 Pro' },
+  { id: 'gpt-5.5', name: 'GPT-5.5' },
+  { id: 'gpt-5.4', name: 'GPT-5.4' },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 mini' },
 ];
 
 // ─── Auth file (dual-section: { anthropic: {...}, openai: {...} }) ───
@@ -135,6 +136,51 @@ function loadModels() {
 }
 
 const { anthropic: ANTHROPIC_MODELS, openai: OPENAI_MODELS } = loadModels();
+
+// ─── Live OpenAI model discovery ───
+// The ChatGPT backend exposes the exact catalog it will serve this account, gated
+// by the client version we report. Preferred over any static list: OpenAI rotates
+// slugs (gpt-5.2 → gpt-5.4 → gpt-5.5 …) and retired ones fail at request time.
+const OPENAI_MODELS_TTL_MS = 60 * 60 * 1000;  // 1h
+let openaiModelsCache = { fetchedAt: 0, models: null };
+
+async function fetchOpenAIModels() {
+  const fresh = Date.now() - openaiModelsCache.fetchedAt < OPENAI_MODELS_TTL_MS;
+  if (fresh && openaiModelsCache.models) return openaiModelsCache.models;
+
+  try {
+    const tokens = await getOAuthTokens('openai');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+    const url = `${OPENAI_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CLI_VERSION)}`;
+    const response = await fetch(url, {
+      headers: {
+        'authorization': `Bearer ${tokens.accessToken}`,
+        'originator': 'codex_cli_rs',
+        'user-agent': CODEX_CLI_UA,
+        'version': CODEX_CLI_VERSION,
+        ...(tokens.accountId && { 'chatgpt-account-id': tokens.accountId }),
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const models = (data.models || [])
+      .filter(m => m.slug)
+      .map(m => ({ id: m.slug, name: m.display_name || m.slug }));
+    if (models.length === 0) throw new Error('empty catalog');
+
+    openaiModelsCache = { fetchedAt: Date.now(), models };
+    console.log(`[MODELS] OpenAI catalog refreshed (client_version=${CODEX_CLI_VERSION}): ${models.map(m => m.id).join(', ')}`);
+    return models;
+  } catch (e) {
+    console.warn(`[MODELS] OpenAI catalog fetch failed (${e.message}), falling back to static list`);
+    // Serve a stale cache over the static list — it was real at some point.
+    return openaiModelsCache.models || OPENAI_MODELS;
+  }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // §2  Auth File Management (dual-section)
@@ -942,12 +988,10 @@ async function handleOpenAIChat(req, res, body) {
   try { tokens = await getOAuthTokens('openai'); }
   catch (e) { return sendJSON(res, 503, { error: { message: e.message, type: 'provider_unavailable' } }); }
 
-  // 2. Check accountId (required for ChatGPT Backend)
+  // 2. accountId is optional — the ChatGPT backend accepts requests without the
+  //    chatgpt-account-id header, so a missing one must not block the request.
   if (!tokens.accountId) {
-    return sendJSON(res, 503, { error: {
-      message: 'OpenAI accountId missing. Re-run "node server.js --login openai" on the host to capture accountId from OAuth.',
-      type: 'provider_unavailable',
-    } });
+    console.warn('[OPENAI] No accountId stored; sending request without chatgpt-account-id header.');
   }
 
   // 3. Convert Chat Completions → Codex Responses format
@@ -969,7 +1013,7 @@ async function handleOpenAIChat(req, res, body) {
         'authorization': `Bearer ${tok.accessToken}`,
         'content-type': 'application/json',
         'accept': 'text/event-stream',
-        'chatgpt-account-id': tok.accountId,
+        ...(tok.accountId && { 'chatgpt-account-id': tok.accountId }),
         'openai-beta': 'responses=experimental',
         'originator': 'codex_cli_rs',
         'session_id': codexBody.prompt_cache_key,
@@ -1213,9 +1257,10 @@ async function handleRequest(req, res) {
 
   // Models list — merged from both providers
   if (path === '/v1/models' && method === 'GET') {
+    const openaiModels = await fetchOpenAIModels();
     const allModels = [
       ...ANTHROPIC_MODELS.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'anthropic' })),
-      ...OPENAI_MODELS.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'openai' })),
+      ...openaiModels.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'openai' })),
     ];
     return sendJSON(res, 200, { object: 'list', data: allModels });
   }

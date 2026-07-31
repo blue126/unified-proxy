@@ -99,19 +99,14 @@ curl https://your-proxy.example.com/v1/models \
     { "id": "claude-opus-4-5",      "object": "model", "owned_by": "anthropic" },
     { "id": "claude-sonnet-4-5",    "object": "model", "owned_by": "anthropic" },
     { "id": "claude-haiku-4-5",     "object": "model", "owned_by": "anthropic" },
-    { "id": "codex-mini-latest",    "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.3-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.3-codex-spark",  "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.2-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.2",              "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex-max",    "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex",        "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5.1-codex-mini",   "object": "model", "owned_by": "openai" },
-    { "id": "gpt-5-codex",          "object": "model", "owned_by": "openai" },
-    { "id": "o3-pro",               "object": "model", "owned_by": "openai" }
+    { "id": "gpt-5.5",              "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.4",              "object": "model", "owned_by": "openai" },
+    { "id": "gpt-5.4-mini",         "object": "model", "owned_by": "openai" }
   ]
 }
 ```
+
+> The OpenAI half of this list is **fetched live** from the ChatGPT backend and cached for an hour, so it reflects what your account can actually call today. OpenAI retires model slugs without notice — the exact ids above will differ over time. Query the endpoint rather than hardcoding them.
 
 ---
 
@@ -169,7 +164,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "o3-pro",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Explain quantum entanglement."}
@@ -222,7 +217,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
   -H "Authorization: Bearer $PROXY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "o3-pro",
+    "model": "gpt-5.4",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Solve this math problem step by step..."}
@@ -326,10 +321,8 @@ Set the OpenAI API base URL to `https://your-proxy.example.com/v1` and API key t
         "claude-opus-4-6",
         "claude-sonnet-4-6",
         "claude-haiku-4-5",
-        "codex-mini-latest",
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "o3-pro"
+        "gpt-5.5",
+        "gpt-5.4"
       ],
       "apiKey": "<your PROXY_API_KEY>",
       "baseURL": "https://your-proxy.example.com/v1"
@@ -362,8 +355,9 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 | `PROXY_API_KEY` | _(none)_ | API key for all non-health endpoints. **If unset, auth is disabled** (fine for local use). |
 | `PROXY_AUTH_FILE` | `~/.unified-proxy/auth.json` | Path to OAuth token storage |
 | `CLAUDE_ACCESS_TOKEN` | _(none)_ | Fallback Anthropic access token. Used if no token is found in `auth.json` or the system Keychain. |
-| `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback OpenAI access token. Used if no token is found in `auth.json`. Must be paired with `OPENAI_ACCOUNT_ID`. |
-| `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID, required when using `OPENAI_ACCESS_TOKEN`. |
+| `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback OpenAI access token. Used if no token is found in `auth.json`. |
+| `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID. Optional — the ChatGPT backend accepts requests without it. |
+| `CODEX_CLI_VERSION` | `0.150.0` | Codex CLI version reported to the ChatGPT backend. This gates which models the backend will serve: a newer model may be rejected with "requires a newer version of Codex" until this is raised. |
 
 ---
 
@@ -560,7 +554,7 @@ npm run smoke
 BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx npm run smoke
 ```
 
-Calls `claude-sonnet-4-6` and `gpt-5.2` with a real prompt and verifies a non-empty response is returned.
+Picks the first available model from each provider via `/v1/models`, sends a real prompt, and verifies a non-empty response is returned. Model ids are resolved at runtime rather than hardcoded, so the script does not rot when a provider retires a slug. Pin a specific model with `SMOKE_ANTHROPIC_MODEL` / `SMOKE_OPENAI_MODEL`.
 
 ---
 

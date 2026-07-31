@@ -221,11 +221,15 @@ describe('OpenAI env var fallback', () => {
     proc2 = null;
   });
 
-  test('OPENAI_ACCESS_TOKEN set but no OPENAI_ACCOUNT_ID → 503 missing accountId', async () => {
+  test('OPENAI_ACCESS_TOKEN set but no OPENAI_ACCOUNT_ID → not blocked, reaches upstream', async () => {
+    // The ChatGPT backend does not require the chatgpt-account-id header, so a
+    // missing accountId must not short-circuit the request. It should travel
+    // upstream and fail on the (fake) token instead.
     const { status, body } = await api('/v1/chat/completions',
-      authed(post({ model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }] })));
+      authed(post({ model: 'gpt-5.4', messages: [{ role: 'user', content: 'hi' }] })));
     assert.equal(status, 503);
-    assert.match(body.error.message, /accountId|account/i);
+    assert.doesNotMatch(body.error.message, /accountId/i);
+    assert.match(body.error.message, /authentication failed/i);
   });
 
   test('OPENAI_ACCESS_TOKEN + OPENAI_ACCOUNT_ID set → token loads, request reaches upstream', async () => {
