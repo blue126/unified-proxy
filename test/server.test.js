@@ -98,6 +98,38 @@ describe('Health check', () => {
     const { status } = await api('/');
     assert.equal(status, 200);
   });
+
+  test('a dead provider is not masked by a healthy one', async () => {
+    // Regression guard: /health used to report "ok" whenever *any* provider was
+    // valid, which let a completely broken Anthropic go unnoticed for weeks.
+    //
+    // Asserted as an invariant rather than against a named provider: Anthropic
+    // has Keychain/CLI-credential fallbacks, so which providers resolve depends
+    // on the machine the tests run on.
+    const { body } = await api('/health');
+    const unhealthy = Object.entries(body.providers)
+      .filter(([, p]) => p.status !== 'valid')
+      .map(([name]) => name);
+
+    assert.deepEqual(body.unhealthyProviders ?? [], unhealthy,
+      'unhealthyProviders must list exactly the non-valid providers');
+    assert.equal(body.status === 'ok', unhealthy.length === 0,
+      'status may be "ok" only when every provider is valid');
+    if (unhealthy.length > 0 && unhealthy.length < Object.keys(body.providers).length) {
+      assert.equal(body.status, 'degraded');
+    }
+  });
+
+  test('health exposes per-provider refresh state', async () => {
+    const { body } = await api('/health');
+    for (const provider of ['anthropic', 'openai']) {
+      const refresh = body.providers[provider]?.refresh;
+      assert.ok(refresh, `${provider} should report refresh state`);
+      assert.equal(typeof refresh.consecutiveFailures, 'number');
+      assert.ok('lastError' in refresh);
+      assert.ok('lastSuccessAt' in refresh);
+    }
+  });
 });
 
 describe('Authentication', () => {

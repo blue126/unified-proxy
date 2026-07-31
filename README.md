@@ -357,6 +357,7 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 | `CLAUDE_ACCESS_TOKEN` | _(none)_ | Fallback Anthropic access token. Used if no token is found in `auth.json` or the system Keychain. |
 | `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback OpenAI access token. Used if no token is found in `auth.json`. |
 | `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID. Optional — the ChatGPT backend accepts requests without it. |
+| `ALERT_WEBHOOK_URL` | _(none)_ | If set, token-refresh failures and recoveries are POSTed here as `{"text": "..."}` (Slack/Discord-compatible). Alerts fire on the 1st, 5th, 20th and every 100th consecutive failure — not on every retry. Failures are always logged regardless. |
 | `CODEX_CLI_VERSION` | `0.150.0` | Codex CLI version reported to the ChatGPT backend. This gates which models the backend will serve: a newer model may be rejected with "requires a newer version of Codex" until this is raised. |
 
 ---
@@ -475,7 +476,13 @@ sudo journalctl -u unified-proxy -n 100
 
 ## Continuous Deployment (CD)
 
-Push to `main` → GitHub Actions automatically deploys to the OCI VM and restarts the service. A smoke test (health check + models list) runs after each deploy to verify the endpoint is up.
+Push to `main` → GitHub Actions automatically deploys to the OCI VM and restarts the service. A smoke test (health check + models list) runs after each deploy to verify the endpoint is up. A degraded provider is reported as a warning but does not fail the deploy — dead credentials are not a deploy regression.
+
+### Monitoring
+
+`.github/workflows/monitor.yml` runs every 6 hours (and on demand via **Actions → Monitor deployed proxy → Run workflow**). It fails — and GitHub notifies you — when any provider is unhealthy, reporting the consecutive refresh-failure count and the last refresh error. It then runs the live inference smoke test.
+
+This exists because both halves of this proxy rot silently. An OAuth refresh token can be revoked upstream at any time, and OpenAI retires model slugs without notice. Neither shows up as the service being down: the process keeps running and answering, it just stops being able to do anything useful. Set `ALERT_WEBHOOK_URL` on the server for immediate push alerts in addition to the scheduled check.
 
 ### Secret management
 

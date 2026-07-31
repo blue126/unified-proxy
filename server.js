@@ -14,7 +14,7 @@
 import { createServer } from 'node:http';
 import { execSync } from 'node:child_process';
 import { randomUUID, createHash, randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -95,6 +95,7 @@ const CONNECT_TIMEOUT_MS = 10_000;  // 10s connect timeout
 // ─── Background refresh config ───
 const REFRESH_CHECK_INTERVAL = 30 * 60 * 1000;  // 30 min
 const REFRESH_AHEAD_MS = 2 * 60 * 60 * 1000;    // 2 hours before expiry
+const REFRESH_TIMEOUT_MS = 30_000;              // cap on a single token refresh call
 
 // ─── Token caching (per-provider) ───
 let cachedTokens = { anthropic: null, openai: null };
@@ -199,7 +200,13 @@ function loadAuthFile() {
 function saveAuthFile(data) {
   try {
     mkdirSync(dirname(AUTH_FILE), { recursive: true });
-    writeFileSync(AUTH_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+    // Write to a temp file in the same directory, then rename. rename(2) is
+    // atomic within a filesystem, so a crash mid-write can never leave a
+    // truncated auth.json — which would lose *both* providers' tokens and
+    // force a re-login.
+    const tmp = `${AUTH_FILE}.tmp`;
+    writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+    renameSync(tmp, AUTH_FILE);
   } catch (e) {
     console.error(`[AUTH] Error writing ${AUTH_FILE}: ${e.message}`);
   }
@@ -337,9 +344,83 @@ async function getOAuthTokens(provider = 'anthropic') {
   return oauth;
 }
 
-async function doRefreshToken(refreshTok, provider = 'anthropic') {
+// Refresh state per provider, surfaced on /health so a broken refresh chain is
+// visible instead of silent. A dead provider used to be invisible: /health still
+// reported "ok" as long as the *other* provider was alive.
+const refreshState = {
+  anthropic: { consecutiveFailures: 0, lastError: null, lastFailureAt: null, lastSuccessAt: null },
+  openai:    { consecutiveFailures: 0, lastError: null, lastFailureAt: null, lastSuccessAt: null },
+};
+
+// In-flight refresh per provider. Both the background loop and the request path
+// can trigger a refresh; without this they race, each POSTing the same rolling
+// refresh token. The loser gets "Refresh token not found or invalid", and a
+// server implementing reuse detection may revoke the whole token family.
+const inFlightRefresh = {};
+
+function noteRefreshSuccess(provider) {
+  const s = refreshState[provider];
+  if (s.consecutiveFailures > 0) {
+    console.log(`[${provider.toUpperCase()} TOKEN REFRESH] Recovered after ${s.consecutiveFailures} failure(s)`);
+    sendAlert(`${provider} token refresh recovered after ${s.consecutiveFailures} failure(s).`);
+  }
+  s.consecutiveFailures = 0;
+  s.lastError = null;
+  s.lastSuccessAt = Date.now();
+}
+
+function noteRefreshFailure(provider, error) {
+  const s = refreshState[provider];
+  s.consecutiveFailures += 1;
+  s.lastError = error;
+  s.lastFailureAt = Date.now();
+  // Alert on the first failure, then back off geometrically. The old behaviour
+  // logged ~2000 identical failures over six weeks and told nobody.
+  const n = s.consecutiveFailures;
+  if (n === 1 || n === 5 || n === 20 || (n % 100 === 0)) {
+    sendAlert(
+      `${provider} token refresh FAILED ${n}x (latest: ${error}). ` +
+      `Re-authenticate with "node server.js --login ${provider}".`
+    );
+  }
+}
+
+// Optional outbound alert. Fire-and-forget: alerting must never break serving.
+const ALERT_WEBHOOK_URL = process.env.ALERT_WEBHOOK_URL || '';
+function sendAlert(message) {
+  console.error(`[ALERT] ${message}`);
+  if (!ALERT_WEBHOOK_URL) return;
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 5000);
+  fetch(ALERT_WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: `[unified-proxy] ${message}` }),
+    signal: controller.signal,
+  }).catch(e => console.error(`[ALERT] Webhook delivery failed: ${e.message}`));
+}
+
+function doRefreshToken(refreshTok, provider = 'anthropic') {
+  // Coalesce: a concurrent caller joins the running refresh instead of starting
+  // a second one with the same (single-use) token.
+  if (inFlightRefresh[provider]) {
+    console.log(`[${provider.toUpperCase()} TOKEN REFRESH] Already in flight, joining it`);
+    return inFlightRefresh[provider];
+  }
+  const promise = doRefreshTokenUncoalesced(refreshTok, provider)
+    .finally(() => { delete inFlightRefresh[provider]; });
+  inFlightRefresh[provider] = promise;
+  return promise;
+}
+
+async function doRefreshTokenUncoalesced(refreshTok, provider = 'anthropic') {
   const tokenUrl = provider === 'openai' ? OPENAI_TOKEN_URL : ANTHROPIC_TOKEN_URL;
   const clientId = provider === 'openai' ? OPENAI_CLIENT_ID : ANTHROPIC_CLIENT_ID;
+
+  // Bound the request. Without this a hung connection stalls the background
+  // refresh loop indefinitely.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
 
   try {
     console.log(`[${provider.toUpperCase()} TOKEN REFRESH] Attempting...`);
@@ -356,6 +437,7 @@ async function doRefreshToken(refreshTok, provider = 'anthropic') {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: params.toString(),
+        signal: controller.signal,
       });
     } else {
       // Anthropic uses application/json
@@ -363,24 +445,33 @@ async function doRefreshToken(refreshTok, provider = 'anthropic') {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshTok, client_id: clientId }),
+        signal: controller.signal,
       });
     }
 
     if (!response.ok) {
       const err = await response.text();
       console.error(`[${provider.toUpperCase()} TOKEN REFRESH FAILED] Status ${response.status}: ${err}`);
+      noteRefreshFailure(provider, `HTTP ${response.status}: ${err.slice(0, 200)}`);
       return null;
     }
     const data = await response.json();
     console.log(`[${provider.toUpperCase()} TOKEN REFRESH] Success, valid for ${(data.expires_in / 3600).toFixed(1)}h`);
+    noteRefreshSuccess(provider);
     return {
       accessToken: data.access_token,
       refreshToken: data.refresh_token || refreshTok,
       expiresAt: Date.now() + (data.expires_in * 1000),
     };
   } catch (e) {
-    console.error(`[${provider.toUpperCase()} TOKEN REFRESH ERROR] ${e.message}`);
+    // An aborted request is ambiguous: the server may have consumed and rotated
+    // the token before we gave up, in which case our stored copy is now dead.
+    const detail = e.name === 'AbortError' ? `timed out after ${REFRESH_TIMEOUT_MS}ms` : e.message;
+    console.error(`[${provider.toUpperCase()} TOKEN REFRESH ERROR] ${detail}`);
+    noteRefreshFailure(provider, detail);
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1245,12 +1336,33 @@ async function handleRequest(req, res) {
         providerStatus[provider] = { status: 'unavailable', error: e.message };
       }
     }
+    // Attach refresh health so a broken chain is visible even while the token
+    // itself still looks valid.
+    for (const provider of ['anthropic', 'openai']) {
+      const s = refreshState[provider];
+      providerStatus[provider].refresh = {
+        consecutiveFailures: s.consecutiveFailures,
+        lastError: s.lastError,
+        lastSuccessAt: s.lastSuccessAt ? new Date(s.lastSuccessAt).toISOString() : null,
+        lastFailureAt: s.lastFailureAt ? new Date(s.lastFailureAt).toISOString() : null,
+      };
+    }
+
+    // "ok" only when every provider is actually usable. Previously one healthy
+    // provider masked a completely dead one, so Anthropic could be broken for
+    // six weeks while /health cheerfully reported ok.
+    const allValid = Object.values(providerStatus).every(p => p.status === 'valid');
     const anyValid = Object.values(providerStatus).some(p => p.status === 'valid');
+    const unhealthy = Object.entries(providerStatus)
+      .filter(([, p]) => p.status !== 'valid')
+      .map(([name]) => name);
+
     return sendJSON(res, 200, {
-      status: anyValid ? 'ok' : 'degraded',
+      status: allValid ? 'ok' : (anyValid ? 'degraded' : 'down'),
       version: VERSION,
       mode: 'unified-proxy',
       features: ['anthropic-oauth', 'openai-oauth', 'auto-refresh', 'model-routing', 'tools', 'xml-history'],
+      ...(unhealthy.length > 0 && { unhealthyProviders: unhealthy }),
       providers: providerStatus,
     });
   }

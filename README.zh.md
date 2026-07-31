@@ -355,6 +355,7 @@ opencode
 | `CLAUDE_ACCESS_TOKEN` | _（空）_ | Anthropic 兜底 access token。在 `auth.json` 和系统 Keychain 均未找到 token 时使用。 |
 | `OPENAI_ACCESS_TOKEN` | _（空）_ | OpenAI 兜底 access token。在 `auth.json` 未找到 token 时使用。 |
 | `OPENAI_ACCOUNT_ID` | _（空）_ | ChatGPT account ID。可选 —— ChatGPT 后端不强制要求该 header。 |
+| `ALERT_WEBHOOK_URL` | _（空）_ | 设置后，token 刷新失败与恢复会以 `{"text": "..."}` POST 到该地址（兼容 Slack/Discord）。告警在第 1、5、20 次及此后每 100 次连续失败时触发，不会每次重试都发。无论是否设置，失败都会写日志。 |
 | `CODEX_CLI_VERSION` | `0.150.0` | 上报给 ChatGPT 后端的 Codex CLI 版本号。它决定后端愿意提供哪些模型：新模型在此值提升前会被拒绝并提示 "requires a newer version of Codex"。 |
 
 ---
@@ -473,7 +474,13 @@ sudo journalctl -u unified-proxy -n 100
 
 ## 持续部署（CD）
 
-推送到 `main` 分支后，GitHub Actions 自动通过 SSH 将最新代码部署到 OCI VM 并重启服务。每次部署后自动运行冒烟测试（健康检查 + 模型列表查询）验证服务可用。
+推送到 `main` 分支后，GitHub Actions 自动通过 SSH 将最新代码部署到 OCI VM 并重启服务。每次部署后自动运行冒烟测试（健康检查 + 模型列表查询）验证服务可用。某个 provider 处于降级状态时会输出警告，但不会让部署失败——凭据失效不属于部署回归。
+
+### 监控
+
+`.github/workflows/monitor.yml` 每 6 小时运行一次（也可在 **Actions → Monitor deployed proxy → Run workflow** 手动触发）。任一 provider 不健康时它会失败并由 GitHub 通知你，同时报告连续刷新失败次数和最后一次刷新错误，随后运行真实推理冒烟测试。
+
+之所以需要它，是因为这个代理的两半都会**无声腐化**：OAuth refresh token 可能在任意时刻被上游吊销，OpenAI 也会不加通知地下架模型。这两种情况都不表现为「服务挂了」——进程照常运行、照常响应，只是再也做不了任何有用的事。在服务器上设置 `ALERT_WEBHOOK_URL` 可在定时检查之外获得即时推送告警。
 
 ### Secret 管理
 
