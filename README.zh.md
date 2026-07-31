@@ -173,6 +173,31 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
+#### 视觉（图片输入）
+
+两个 provider 都支持标准 Chat Completions 的 `image_url` 内容块。走 OpenAI 的请求会
+转换成 Responses API 的 `input_image` 块；远程 URL 和 `data:` URI 都原样透传，托管在
+网上的图片不需要自己先转 base64。
+
+```bash
+curl https://your-proxy.example.com/v1/chat/completions \
+  -H "Authorization: Bearer $PROXY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.4-mini",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "这张图里是什么？"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/photo.jpg"}}
+      ]
+    }]
+  }'
+```
+
+单条消息可以带多张图；`image_url` 既可以写成 `{"url": "…"}`（可选 `detail`），也可以
+直接写成 URL 字符串。
+
 #### 推理 / Thinking 参数
 
 ##### Claude 扩展思考（Anthropic 模型）

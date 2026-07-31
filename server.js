@@ -14,10 +14,11 @@
 import { createServer } from 'node:http';
 import { execSync } from 'node:child_process';
 import { randomUUID, createHash, randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 
 const PORT = process.env.PORT || 3456;
 const HOST = process.env.HOST || '127.0.0.1';
@@ -807,12 +808,12 @@ function convertToCodexRequest(body) {
         instructions.push(extractTextContent(msg.content));
         break;
       case 'user': {
-        const text = extractTextContent(msg.content);
-        if (text) {
+        const content = buildUserContent(msg.content);
+        if (content.length > 0) {
           input.push({
             type: 'message',
             role: 'user',
-            content: [{ type: 'input_text', text }],
+            content,
           });
         }
         break;
@@ -853,6 +854,13 @@ function convertToCodexRequest(body) {
     }
   }
 
+  // `input` is required upstream. Catch an empty one here — otherwise we ship a
+  // malformed request and the backend answers with a misleading
+  // "Missing required parameter: 'input'" that points at the wrong layer.
+  if (input.length === 0) {
+    return { error: { message: 'No usable content in "messages": every non-system message was empty or contained only unsupported content blocks.', type: 'invalid_request_error', param: 'messages' } };
+  }
+
   // Build Codex request body
   const codexBody = {
     model: stripPrefix(model),
@@ -862,9 +870,7 @@ function convertToCodexRequest(body) {
 
   // instructions is required by the ChatGPT Backend even if empty
   codexBody.instructions = instructions.length > 0 ? instructions.join('\n\n') : '';
-  if (input.length > 0) {
-    codexBody.input = input;
-  }
+  codexBody.input = input;
 
   // Prompt caching: derive a deterministic session ID from instructions content.
   // Same instructions → same session ID → ChatGPT Backend can reuse cached prefix.
@@ -908,7 +914,12 @@ function convertToCodexRequest(body) {
   return { codexBody };
 }
 
-/** Extract text from string or array content (Chat Completions format). */
+/**
+ * Extract text from string or array content (Chat Completions format).
+ * Non-text blocks are skipped: this feeds roles where the Responses API takes
+ * plain text only (system/developer/assistant/tool), so an image alongside the
+ * text must not cost us the text.
+ */
 function extractTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -916,13 +927,41 @@ function extractTextContent(content) {
     for (const part of content) {
       if (part.type === 'text' && part.text) {
         texts.push(part.text);
-      } else if (part.type === 'image_url') {
-        return null; // signal unsupported multimodal — caller decides
       }
     }
     return texts.join('\n') || null;
   }
   return null;
+}
+
+/**
+ * Build Responses-API content blocks for a user message.
+ * Chat Completions `text` → `input_text`, `image_url` → `input_image`.
+ * Accepts both `image_url: "https://…"` and `image_url: { url, detail }`;
+ * remote URLs and data: URIs are passed through untouched.
+ * Returns [] when the message carries nothing usable.
+ */
+function buildUserContent(content) {
+  if (typeof content === 'string') {
+    return content ? [{ type: 'input_text', text: content }] : [];
+  }
+  if (!Array.isArray(content)) return [];
+
+  const blocks = [];
+  for (const part of content) {
+    if (part.type === 'text' && part.text) {
+      blocks.push({ type: 'input_text', text: part.text });
+    } else if (part.type === 'image_url') {
+      const spec = part.image_url;
+      const url = typeof spec === 'string' ? spec : spec?.url;
+      if (!url) continue;
+      const block = { type: 'input_image', image_url: url };
+      const detail = typeof spec === 'object' ? spec?.detail : undefined;
+      if (detail) block.detail = detail;
+      blocks.push(block);
+    }
+  }
+  return blocks;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1074,21 +1113,23 @@ async function handleOpenAIChat(req, res, body) {
 
   console.log(`[OPENAI ${stream ? 'STREAM' : 'SYNC'}] model=${bareModel}, msgs=${body.messages?.length || 0}, tools=${body.tools?.length || 0}`);
 
-  // 1. Get OAuth tokens
+  // 1. Convert Chat Completions → Codex Responses format.
+  //    Done before auth so a bad request reports as 400, not as whatever the
+  //    token state happens to be.
+  const { error: convError, codexBody } = convertToCodexRequest(body);
+  if (convError) {
+    return sendJSON(res, 400, { error: convError });
+  }
+
+  // 2. Get OAuth tokens
   let tokens;
   try { tokens = await getOAuthTokens('openai'); }
   catch (e) { return sendJSON(res, 503, { error: { message: e.message, type: 'provider_unavailable' } }); }
 
-  // 2. accountId is optional — the ChatGPT backend accepts requests without the
+  // 3. accountId is optional — the ChatGPT backend accepts requests without the
   //    chatgpt-account-id header, so a missing one must not block the request.
   if (!tokens.accountId) {
     console.warn('[OPENAI] No accountId stored; sending request without chatgpt-account-id header.');
-  }
-
-  // 3. Convert Chat Completions → Codex Responses format
-  const { error: convError, codexBody } = convertToCodexRequest(body);
-  if (convError) {
-    return sendJSON(res, 400, { error: convError });
   }
 
   console.log(`[OPENAI] → ChatGPT Backend: model=${codexBody.model}, input=${codexBody.input?.length || 0}, tools=${codexBody.tools?.length || 0}, cache_key=${codexBody.prompt_cache_key}`);
@@ -1583,8 +1624,20 @@ async function loginOpenAI() {
 }
 
 // ─── CLI entry point ───
+// Guarded so importing this file (tests exercise the conversion helpers directly)
+// neither starts the OAuth flow nor binds the port.
+const isDirectRun = (() => {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+})();
+
 const loginIdx = process.argv.indexOf('--login');
-if (loginIdx !== -1) {
+if (!isDirectRun) {
+  // Imported as a module — expose helpers, run nothing.
+} else if (loginIdx !== -1) {
   const nextArg = process.argv[loginIdx + 1];
   // Determine target: default to 'anthropic' for backward compat
   const target = (nextArg && !nextArg.startsWith('-')) ? nextArg : 'anthropic';
@@ -1687,3 +1740,6 @@ if (loginIdx !== -1) {
   process.on('SIGTERM', () => { server.close(() => process.exit(0)); });
   process.on('SIGINT', () => { server.close(() => process.exit(0)); });
 }
+
+// ─── Exports (unit tests) ───
+export { convertToCodexRequest, buildUserContent, extractTextContent, routeRequest };

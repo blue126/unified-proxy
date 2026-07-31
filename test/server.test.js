@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { convertToCodexRequest, buildUserContent } from '../server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(__dirname, '..', 'server.js');
@@ -281,5 +282,149 @@ describe('OpenAI env var fallback', () => {
       assert.match(body.error.message, /authentication failed after refresh/i,
         'expected upstream auth failure, not a "no token" or "missing accountId" error');
     }
+  });
+});
+
+// ─── Request conversion: Chat Completions → Codex Responses ──────────────────
+// Pure-function tests (no server, no upstream). These cover the multimodal path
+// that previously dropped image blocks and silently produced a body with no
+// `input`, which the backend rejected as "Missing required parameter: 'input'".
+
+describe('convertToCodexRequest — multimodal', () => {
+  const userMsg = (content) => ({ model: 'gpt-5.4-mini', messages: [{ role: 'user', content }] });
+
+  test('text + image_url → input_text + input_image (text is not lost)', () => {
+    const { error, codexBody } = convertToCodexRequest(userMsg([
+      { type: 'text', text: '这是什么？' },
+      { type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } },
+    ]));
+    assert.equal(error, undefined);
+    assert.equal(codexBody.input.length, 1);
+    assert.deepEqual(codexBody.input[0].content, [
+      { type: 'input_text', text: '这是什么？' },
+      { type: 'input_image', image_url: 'https://example.com/a.jpg' },
+    ]);
+  });
+
+  test('image-only content still produces a message', () => {
+    const { error, codexBody } = convertToCodexRequest(userMsg([
+      { type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } },
+    ]));
+    assert.equal(error, undefined);
+    assert.deepEqual(codexBody.input[0].content, [
+      { type: 'input_image', image_url: 'https://example.com/a.jpg' },
+    ]);
+  });
+
+  test('multiple images are all forwarded in order', () => {
+    const { codexBody } = convertToCodexRequest(userMsg([
+      { type: 'text', text: 'compare' },
+      { type: 'image_url', image_url: { url: 'https://example.com/1.jpg' } },
+      { type: 'image_url', image_url: { url: 'https://example.com/2.jpg' } },
+    ]));
+    assert.deepEqual(codexBody.input[0].content.map(b => b.type),
+      ['input_text', 'input_image', 'input_image']);
+    assert.equal(codexBody.input[0].content[2].image_url, 'https://example.com/2.jpg');
+  });
+
+  test('data: URI is passed through untouched', () => {
+    const dataUri = 'data:image/png;base64,iVBORw0KGgo=';
+    const { codexBody } = convertToCodexRequest(userMsg([
+      { type: 'image_url', image_url: { url: dataUri } },
+    ]));
+    assert.equal(codexBody.input[0].content[0].image_url, dataUri);
+  });
+
+  test('detail is forwarded when present, omitted when absent', () => {
+    const withDetail = convertToCodexRequest(userMsg([
+      { type: 'image_url', image_url: { url: 'https://example.com/a.jpg', detail: 'high' } },
+    ])).codexBody;
+    assert.equal(withDetail.input[0].content[0].detail, 'high');
+
+    const without = convertToCodexRequest(userMsg([
+      { type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } },
+    ])).codexBody;
+    assert.equal('detail' in without.input[0].content[0], false);
+  });
+
+  test('shorthand image_url as a bare string is accepted', () => {
+    const { codexBody } = convertToCodexRequest(userMsg([
+      { type: 'image_url', image_url: 'https://example.com/a.jpg' },
+    ]));
+    assert.deepEqual(codexBody.input[0].content, [
+      { type: 'input_image', image_url: 'https://example.com/a.jpg' },
+    ]);
+  });
+
+  test('image_url without a usable url is skipped, not fatal', () => {
+    const { error, codexBody } = convertToCodexRequest(userMsg([
+      { type: 'text', text: 'hi' },
+      { type: 'image_url', image_url: {} },
+    ]));
+    assert.equal(error, undefined);
+    assert.deepEqual(codexBody.input[0].content, [{ type: 'input_text', text: 'hi' }]);
+  });
+});
+
+describe('convertToCodexRequest — text paths (regression)', () => {
+  test('string content → input_text', () => {
+    const { codexBody } = convertToCodexRequest({ model: 'gpt-5.4-mini', messages: [{ role: 'user', content: 'hello' }] });
+    assert.deepEqual(codexBody.input[0].content, [{ type: 'input_text', text: 'hello' }]);
+  });
+
+  test('text-only array content → input_text', () => {
+    const { codexBody } = convertToCodexRequest({
+      model: 'gpt-5.4-mini',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }],
+    });
+    assert.deepEqual(codexBody.input[0].content, [{ type: 'input_text', text: 'hello' }]);
+  });
+
+  test('system message with an image block keeps its text in instructions', () => {
+    const { codexBody } = convertToCodexRequest({
+      model: 'gpt-5.4-mini',
+      messages: [
+        { role: 'system', content: [{ type: 'text', text: 'be terse' }, { type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } }] },
+        { role: 'user', content: 'hi' },
+      ],
+    });
+    assert.equal(codexBody.instructions, 'be terse');
+  });
+
+  test('reasoning_effort still passes through alongside images', () => {
+    const { codexBody } = convertToCodexRequest({
+      model: 'gpt-5.4-mini',
+      reasoning_effort: 'high',
+      messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.jpg' } }] }],
+    });
+    assert.deepEqual(codexBody.reasoning, { effort: 'high' });
+  });
+});
+
+describe('convertToCodexRequest — empty input is caught locally', () => {
+  test('no messages → 400-shaped error, never a body without input', () => {
+    const { error, codexBody } = convertToCodexRequest({ model: 'gpt-5.4-mini', messages: [] });
+    assert.equal(codexBody, undefined);
+    assert.equal(error.type, 'invalid_request_error');
+    assert.equal(error.param, 'messages');
+  });
+
+  test('system-only conversation → explicit error, not a malformed upstream call', () => {
+    const { error } = convertToCodexRequest({
+      model: 'gpt-5.4-mini',
+      messages: [{ role: 'system', content: 'be terse' }],
+    });
+    assert.equal(error.type, 'invalid_request_error');
+  });
+});
+
+describe('buildUserContent', () => {
+  test('empty string yields no blocks', () => {
+    assert.deepEqual(buildUserContent(''), []);
+  });
+
+  test('null/undefined content yields no blocks', () => {
+    assert.deepEqual(buildUserContent(null), []);
+    assert.deepEqual(buildUserContent(undefined), []);
   });
 });

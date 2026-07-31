@@ -173,6 +173,32 @@ curl https://your-proxy.example.com/v1/chat/completions \
   }'
 ```
 
+#### Vision (image input)
+
+Both providers accept images through the standard Chat Completions `image_url`
+content block. OpenAI-routed requests convert it to the Responses API
+`input_image` block; remote URLs and `data:` URIs are both passed through
+untouched, so there is no need to base64-encode a hosted image yourself.
+
+```bash
+curl https://your-proxy.example.com/v1/chat/completions \
+  -H "Authorization: Bearer $PROXY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gpt-5.4-mini",
+    "messages": [{
+      "role": "user",
+      "content": [
+        {"type": "text", "text": "What is in this image?"},
+        {"type": "image_url", "image_url": {"url": "https://example.com/photo.jpg"}}
+      ]
+    }]
+  }'
+```
+
+Multiple images per message are supported, and `image_url` may be given either
+as `{"url": "…"}` (with an optional `detail`) or as a bare URL string.
+
 #### Reasoning / Thinking Parameters
 
 ##### Claude Extended Thinking (Anthropic models)
