@@ -27,8 +27,13 @@ const PROXY_API_KEY = process.env.PROXY_API_KEY || null;
 
 // ─── Anthropic OAuth ───
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_MODELS_URL = 'https://api.anthropic.com/v1/models';
 const ANTHROPIC_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
 const ANTHROPIC_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const ANTHROPIC_API_VERSION = '2023-06-01';
+const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
+// Claude Code impersonation — the Anthropic counterpart of CODEX_CLI_VERSION.
+const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || '2.1.2';
 
 // ─── OpenAI OAuth (cross-verified: openai/codex, open-hax/codex, codex-proxy) ───
 const OPENAI_PLATFORM_API_URL = 'https://api.openai.com/v1/chat/completions';  // 保留，未来 API credits 可用
@@ -70,12 +75,18 @@ const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'claude-sonnet-4-6';
 const MODELS_FILE = process.env.PROXY_MODELS_FILE || join(homedir(), '.unified-proxy', 'models.json');
 
 // ─── Model Lists for /v1/models (defaults; override via models.json) ───
+// Fallback only — fetchAnthropicModels() serves the live catalog. Refreshed
+// 2026-07-31 from the account's actual /v1/models; this list had drifted a full
+// generation behind (it still topped out at 4.6 while 5 was already served).
 const DEFAULT_ANTHROPIC_MODELS = [
-  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+  { id: 'claude-opus-5', name: 'Claude Opus 5' },
+  { id: 'claude-sonnet-5', name: 'Claude Sonnet 5' },
+  { id: 'claude-fable-5', name: 'Claude Fable 5' },
+  { id: 'claude-opus-4-8', name: 'Claude Opus 4.8' },
+  { id: 'claude-opus-4-7', name: 'Claude Opus 4.7' },
   { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-  { id: 'claude-opus-4-5', name: 'Claude Opus 4.5' },
-  { id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
-  { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5' },
+  { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' },
 ];
 
 // Last-resort fallback only. The live catalog is fetched from the ChatGPT backend
@@ -181,6 +192,48 @@ async function fetchOpenAIModels() {
     console.warn(`[MODELS] OpenAI catalog fetch failed (${e.message}), falling back to static list`);
     // Serve a stale cache over the static list — it was real at some point.
     return openaiModelsCache.models || OPENAI_MODELS;
+  }
+}
+
+// ─── Live Anthropic model discovery ───
+// Same reasoning as the OpenAI side: the static list goes stale silently. It sat
+// at 4.6 while the account could already serve the 5 family, so /v1/models
+// advertised a catalog a whole generation behind what actually worked.
+const ANTHROPIC_MODELS_TTL_MS = 60 * 60 * 1000;  // 1h
+let anthropicModelsCache = { fetchedAt: 0, models: null };
+
+async function fetchAnthropicModels() {
+  const fresh = Date.now() - anthropicModelsCache.fetchedAt < ANTHROPIC_MODELS_TTL_MS;
+  if (fresh && anthropicModelsCache.models) return anthropicModelsCache.models;
+
+  try {
+    const tokens = await getOAuthTokens('anthropic');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+    const response = await fetch(`${ANTHROPIC_MODELS_URL}?limit=100`, {
+      headers: {
+        'authorization': `Bearer ${tokens.accessToken}`,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+        'anthropic-beta': ANTHROPIC_OAUTH_BETA,
+        'user-agent': `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const models = (data.data || [])
+      .filter(m => m.id)
+      .map(m => ({ id: m.id, name: m.display_name || m.id }));
+    if (models.length === 0) throw new Error('empty catalog');
+
+    anthropicModelsCache = { fetchedAt: Date.now(), models };
+    console.log(`[MODELS] Anthropic catalog refreshed: ${models.map(m => m.id).join(', ')}`);
+    return models;
+  } catch (e) {
+    console.warn(`[MODELS] Anthropic catalog fetch failed (${e.message}), falling back to static list`);
+    return anthropicModelsCache.models || ANTHROPIC_MODELS;
   }
 }
 
@@ -669,9 +722,9 @@ async function handleAnthropicChat(req, res, body) {
   const apiHeaders = {
     'Authorization': `Bearer ${tokens.accessToken}`,
     'Content-Type': 'application/json',
-    'anthropic-version': '2023-06-01',
-    'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-2024-07-31',
-    'user-agent': 'claude-cli/2.1.2 (external, cli)',
+    'anthropic-version': ANTHROPIC_API_VERSION,
+    'anthropic-beta': `${ANTHROPIC_OAUTH_BETA},interleaved-thinking-2025-05-14,prompt-caching-2024-07-31`,
+    'user-agent': `claude-cli/${CLAUDE_CLI_VERSION} (external, cli)`,
   };
 
   // Enable prompt caching: wrap system as array with cache_control
@@ -1460,9 +1513,13 @@ async function handleRequest(req, res) {
 
   // Models list — merged from both providers
   if (path === '/v1/models' && method === 'GET') {
-    const openaiModels = await fetchOpenAIModels();
+    // Fetch both catalogs concurrently; each falls back to its static list on failure.
+    const [anthropicModels, openaiModels] = await Promise.all([
+      fetchAnthropicModels(),
+      fetchOpenAIModels(),
+    ]);
     const allModels = [
-      ...ANTHROPIC_MODELS.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'anthropic' })),
+      ...anthropicModels.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'anthropic' })),
       ...openaiModels.map(m => ({ id: m.id, object: 'model', created: 1700000000, owned_by: 'openai' })),
     ];
     return sendJSON(res, 200, { object: 'list', data: allModels });
