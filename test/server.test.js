@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { convertToCodexRequest, buildUserContent } from '../server.js';
+import { convertToCodexRequest, buildUserContent, convertMessages, buildAnthropicContent } from '../server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(__dirname, '..', 'server.js');
@@ -426,5 +426,115 @@ describe('buildUserContent', () => {
   test('null/undefined content yields no blocks', () => {
     assert.deepEqual(buildUserContent(null), []);
     assert.deepEqual(buildUserContent(undefined), []);
+  });
+});
+
+// ─── Request conversion: Chat Completions → Anthropic Messages ───────────────
+// The Anthropic path had the same defect the Codex path did: image_url blocks
+// were filtered out by extractText(), so Claude received text only and replied
+// "I don't see an image" while the caller saw a perfectly successful response.
+
+describe('convertMessages — multimodal', () => {
+  const IMG = 'https://example.com/a.jpg';
+  const userMsg = (content) => [{ role: 'user', content }];
+
+  test('text + image_url → text block + image block', () => {
+    const { messages } = convertMessages(userMsg([
+      { type: 'text', text: '这是什么？' },
+      { type: 'image_url', image_url: { url: IMG } },
+    ]));
+    assert.equal(messages.length, 1);
+    assert.deepEqual(messages[0].content, [
+      { type: 'text', text: '这是什么？' },
+      { type: 'image', source: { type: 'url', url: IMG } },
+    ]);
+  });
+
+  test('data: URI becomes a base64 source with media_type', () => {
+    const { messages } = convertMessages(userMsg([
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+    ]));
+    assert.deepEqual(messages[0].content, [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+    ]);
+  });
+
+  test('multiple images all survive, in order', () => {
+    const { messages } = convertMessages(userMsg([
+      { type: 'text', text: 'compare' },
+      { type: 'image_url', image_url: { url: 'https://example.com/1.jpg' } },
+      { type: 'image_url', image_url: { url: 'https://example.com/2.jpg' } },
+    ]));
+    assert.deepEqual(messages[0].content.map(b => b.type), ['text', 'image', 'image']);
+    assert.equal(messages[0].content[2].source.url, 'https://example.com/2.jpg');
+  });
+
+  test('shorthand bare-string image_url is accepted', () => {
+    const { messages } = convertMessages(userMsg([
+      { type: 'image_url', image_url: IMG },
+    ]));
+    assert.deepEqual(messages[0].content, [{ type: 'image', source: { type: 'url', url: IMG } }]);
+  });
+
+  test('consecutive user messages merge without losing the image', () => {
+    const { messages } = convertMessages([
+      { role: 'user', content: 'first' },
+      { role: 'user', content: [{ type: 'text', text: 'second' }, { type: 'image_url', image_url: { url: IMG } }] },
+    ]);
+    assert.equal(messages.length, 1);
+    assert.deepEqual(messages[0].content, [
+      { type: 'text', text: 'first' },
+      { type: 'text', text: 'second' },
+      { type: 'image', source: { type: 'url', url: IMG } },
+    ]);
+  });
+
+  test('tool context is prepended as a text block, image preserved', () => {
+    const { messages } = convertMessages(
+      userMsg([{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: { url: IMG } }]),
+      [{ type: 'function', function: { name: 'foo', description: 'does foo' } }],
+    );
+    assert.equal(messages[0].content[0].type, 'text');
+    assert.match(messages[0].content[0].text, /Available Tools/);
+    assert.deepEqual(messages[0].content.at(-1), { type: 'image', source: { type: 'url', url: IMG } });
+  });
+});
+
+describe('convertMessages — text-only behaviour is unchanged', () => {
+  test('string content stays a plain string', () => {
+    const { messages } = convertMessages([{ role: 'user', content: 'hello' }]);
+    assert.equal(messages[0].content, 'hello');
+  });
+
+  test('text-only array content collapses to a plain string', () => {
+    const { messages } = convertMessages([
+      { role: 'user', content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] },
+    ]);
+    assert.equal(messages[0].content, 'a\nb');
+  });
+
+  test('consecutive text-only user messages still merge with a blank line', () => {
+    const { messages } = convertMessages([
+      { role: 'user', content: 'first' },
+      { role: 'user', content: 'second' },
+    ]);
+    assert.equal(messages[0].content, 'first\n\nsecond');
+  });
+
+  test('image_url with no usable url is skipped', () => {
+    const { messages } = convertMessages([
+      { role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: {} }] },
+    ]);
+    assert.deepEqual(messages[0].content, [{ type: 'text', text: 'hi' }]);
+  });
+});
+
+describe('buildAnthropicContent', () => {
+  test('no-image array returns a string, not blocks', () => {
+    assert.equal(typeof buildAnthropicContent([{ type: 'text', text: 'x' }]), 'string');
+  });
+
+  test('array containing an image returns blocks', () => {
+    assert.ok(Array.isArray(buildAnthropicContent([{ type: 'image_url', image_url: { url: 'https://e/1.jpg' } }])));
   });
 });

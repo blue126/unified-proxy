@@ -543,6 +543,55 @@ function extractText(content) {
   return content?.text || '';
 }
 
+/**
+ * Convert a Chat Completions image_url block to an Anthropic image block.
+ * Remote URLs use the url source; data: URIs are split into media_type + base64.
+ * Returns null when the block carries no usable URL.
+ */
+function toAnthropicImage(spec) {
+  const url = typeof spec === 'string' ? spec : spec?.url;
+  if (!url) return null;
+  const m = /^data:([^;,]+);base64,(.*)$/s.exec(url);
+  if (m) return { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } };
+  return { type: 'image', source: { type: 'url', url } };
+}
+
+/**
+ * Build user-message content for the Anthropic API.
+ * Returns a plain string when no image is present — keeping the long-standing
+ * text-only behaviour byte-identical — and a content block array only when one
+ * is. extractText() used to filter image_url blocks out entirely, so images were
+ * silently dropped and Claude replied "I don't see an image".
+ */
+function buildAnthropicContent(content) {
+  if (!Array.isArray(content)) return extractText(content);
+  if (!content.some(c => c?.type === 'image_url')) return extractText(content);
+
+  const blocks = [];
+  for (const part of content) {
+    if (part.type === 'text' && part.text) {
+      blocks.push({ type: 'text', text: part.text });
+    } else if (part.type === 'image_url') {
+      const img = toAnthropicImage(part.image_url);
+      if (img) blocks.push(img);
+    }
+  }
+  return blocks.length > 0 ? blocks : '';
+}
+
+/** Join two message contents, either of which may be a string or a block array. */
+function mergeContent(a, b) {
+  if (typeof a === 'string' && typeof b === 'string') return a + '\n\n' + b;
+  const toBlocks = (c) => (typeof c === 'string' ? [{ type: 'text', text: c }] : c);
+  return [...toBlocks(a), ...toBlocks(b)];
+}
+
+/** Prepend text to a message content that may be a string or a block array. */
+function prependText(content, text) {
+  if (typeof content === 'string') return text + content;
+  return [{ type: 'text', text }, ...content];
+}
+
 function convertMessages(messages, tools) {
   let systemPrompts = [];
   const anthropicMessages = [];
@@ -551,8 +600,8 @@ function convertMessages(messages, tools) {
     if (msg.role === 'system') {
       systemPrompts.push(extractText(msg.content));
     } else if (msg.role === 'user') {
-      const content = extractText(msg.content);
-      if (content) {
+      const content = buildAnthropicContent(msg.content);
+      if (typeof content === 'string' ? content : content.length > 0) {
         anthropicMessages.push({ role: 'user', content });
       }
     } else if (msg.role === 'assistant') {
@@ -573,7 +622,8 @@ function convertMessages(messages, tools) {
   const fixedMessages = [];
   for (const msg of anthropicMessages) {
     if (fixedMessages.length > 0 && fixedMessages[fixedMessages.length - 1].role === msg.role) {
-      fixedMessages[fixedMessages.length - 1].content += '\n\n' + msg.content;
+      const last = fixedMessages[fixedMessages.length - 1];
+      last.content = mergeContent(last.content, msg.content);
     } else {
       fixedMessages.push(msg);
     }
@@ -584,7 +634,7 @@ function convertMessages(messages, tools) {
   if (toolContext && fixedMessages.length > 0) {
     for (let i = 0; i < fixedMessages.length; i++) {
       if (fixedMessages[i].role === 'user') {
-        fixedMessages[i].content = toolContext + '[User Message]\n' + fixedMessages[i].content;
+        fixedMessages[i].content = prependText(fixedMessages[i].content, toolContext + '[User Message]\n');
         break;
       }
     }
@@ -1742,4 +1792,4 @@ if (!isDirectRun) {
 }
 
 // ─── Exports (unit tests) ───
-export { convertToCodexRequest, buildUserContent, extractTextContent, routeRequest };
+export { convertToCodexRequest, buildUserContent, extractTextContent, routeRequest, convertMessages, buildAnthropicContent };
