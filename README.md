@@ -120,7 +120,7 @@ curl https://your-proxy.example.com/v1/models \
 }
 ```
 
-> The OpenAI half of this list is **fetched live** from the ChatGPT backend and cached for an hour, so it reflects what your account can actually call today. OpenAI retires model slugs without notice — the exact ids above will differ over time. Query the endpoint rather than hardcoding them.
+> **Both halves of this list are fetched live** — Anthropic from `api.anthropic.com/v1/models`, OpenAI from the ChatGPT backend — and cached for an hour, so the list reflects what your account can actually call today. Both providers retire model ids without notice, so the exact ids above will differ over time. Query the endpoint rather than hardcoding them.
 
 ---
 

@@ -120,7 +120,7 @@ curl https://your-proxy.example.com/v1/models \
 }
 ```
 
-> 列表中 OpenAI 的部分是**实时从 ChatGPT 后端拉取**并缓存 1 小时的，反映你的账号当前真正可用的模型。OpenAI 会在不通知的情况下下架模型 slug，所以上面的具体 id 会随时间变化 —— 请查询该接口，不要硬编码。
+> **列表的两半都是实时拉取的** —— Anthropic 来自 `api.anthropic.com/v1/models`，OpenAI 来自 ChatGPT 后端 —— 均缓存 1 小时，反映你的账号当前真正可用的模型。两个 provider 都会在不通知的情况下下架模型 id，所以上面的具体 id 会随时间变化 —— 请查询该接口，不要硬编码。
 
 ---
 
