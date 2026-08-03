@@ -68,13 +68,27 @@ curl https://your-proxy.example.com/health
   "mode": "unified-proxy",
   "features": ["anthropic-oauth", "openai-oauth", "auto-refresh", "model-routing", "tools", "xml-history"],
   "providers": {
-    "anthropic": { "status": "valid", "hoursRemaining": 23.4 },
-    "openai":    { "status": "valid", "hoursRemaining": 11.2 }
+    "anthropic": {
+      "status": "valid",
+      "hoursRemaining": 23.4,
+      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null }
+    },
+    "openai": {
+      "status": "valid",
+      "hoursRemaining": 11.2,
+      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null }
+    }
   }
 }
 ```
 
-`status` is `"ok"` if at least one provider is valid, `"degraded"` if both are unavailable.
+| `status` | Meaning |
+|---|---|
+| `"ok"` | Every provider is valid |
+| `"degraded"` | At least one provider is valid and at least one is not. The failing ones are named in `unhealthyProviders` |
+| `"down"` | No provider is usable |
+
+A partly-broken proxy reports `"degraded"`, **not** `"ok"` — one healthy provider must not mask a dead one. Each provider also reports `refresh`, so a revoked token is visible as a rising `consecutiveFailures` with the upstream error in `lastError`.
 
 ---
 
@@ -155,7 +169,7 @@ curl -N https://your-proxy.example.com/v1/chat/completions \
 
 #### OpenAI model example
 
-> **Note:** The ChatGPT Backend requires a `system` message. Requests without one will fail with `{"detail":"Instructions are required"}`.
+> **Note:** Older Codex models rejected requests without a `system` message (`{"detail":"Instructions are required"}`). Current models (verified 2026-07-31 on gpt-5.4, gpt-5.4-mini and gpt-5.6-sol) accept them, since the proxy sends an empty `instructions` field. Sending a system message is still recommended.
 
 > **Note:** The ChatGPT Backend does **not** support `temperature`, `top_p`, or `max_tokens`. These parameters are silently dropped for all OpenAI-routed requests. Use `reasoning_effort` to control output quality instead.
 
@@ -255,8 +269,49 @@ curl https://your-proxy.example.com/v1/chat/completions \
 | Value | Description |
 |---|---|
 | `"low"` | Fast response, shallow reasoning, suitable for simple tasks |
-| `"medium"` | Default, balances speed and quality |
+| `"medium"` | Balances speed and quality. The default for most models |
 | `"high"` | Deep reasoning, slower, suitable for complex problems |
+| `"xhigh"` | Deeper still. Supported by every current gpt-5.x model |
+| `"max"` | gpt-5.6 series only |
+| `"ultra"` | gpt-5.6-sol / gpt-5.6-terra only |
+
+> **Levels are per-model, and the set changes.** Passing an unsupported level is
+> rejected upstream with `Unsupported value: 'max' is not supported with the
+> 'gpt-5.4-mini' model` — the proxy does not validate or downgrade it. Treat the
+> table below as a snapshot, not a contract.
+
+Verified 2026-07-31:
+
+| Model | Default | Supported levels |
+|---|---|---|
+| `gpt-5.6-sol` | `low` | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-terra` | `medium` | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-luna` | `medium` | low, medium, high, xhigh, max |
+| `gpt-5.5` | `medium` | low, medium, high, xhigh |
+| `gpt-5.4` | `medium` | low, medium, high, xhigh |
+| `gpt-5.4-mini` | `medium` | low, medium, high, xhigh |
+
+The authoritative list is the same catalog `/v1/models` is built from — each entry
+carries `default_reasoning_level` and `supported_reasoning_levels`. To read it
+directly from the host:
+
+```bash
+ACCESS_TOKEN=$(sudo python3 -c "import json;print(json.load(open('/opt/unified-proxy/auth.json'))['openai']['accessToken'])")
+curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.150.0" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H "originator: codex_cli_rs" -H "version: 0.150.0" \
+  | python3 -c "
+import sys, json
+for m in json.load(sys.stdin)['models']:
+    print(m['slug'], m.get('default_reasoning_level'),
+          [l['effort'] for l in m.get('supported_reasoning_levels', [])])
+"
+```
+
+> **Note:** clients may impose their own whitelist. n8n's OpenAI Chat Model node,
+> for example, only offers low/medium/high and only shows the field when the model
+> name matches `(^o1([-\d]+)?$)|(^o[3-9].*)|(^gpt-5.*)`. Use an HTTP Request node
+> to send `xhigh` and above.
 
 > **Default behavior:** If `reasoning_effort` is not provided, the backend default is used (typically medium). For o-series/gpt-5.x models, reasoning is always enabled — this parameter only controls reasoning depth.
 

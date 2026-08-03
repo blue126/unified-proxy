@@ -68,13 +68,27 @@ curl https://your-proxy.example.com/health
   "mode": "unified-proxy",
   "features": ["anthropic-oauth", "openai-oauth", "auto-refresh", "model-routing", "tools", "xml-history"],
   "providers": {
-    "anthropic": { "status": "valid", "hoursRemaining": 23.4 },
-    "openai":    { "status": "valid", "hoursRemaining": 11.2 }
+    "anthropic": {
+      "status": "valid",
+      "hoursRemaining": 23.4,
+      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null }
+    },
+    "openai": {
+      "status": "valid",
+      "hoursRemaining": 11.2,
+      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null }
+    }
   }
 }
 ```
 
-`status` 字段：至少一个 provider 有效时为 `"ok"`，全部不可用时为 `"degraded"`。
+| `status` | 含义 |
+|---|---|
+| `"ok"` | 所有 provider 均有效 |
+| `"degraded"` | 至少一个有效、且至少一个失效。失效的会列在 `unhealthyProviders` 中 |
+| `"down"` | 没有任何 provider 可用 |
+
+部分损坏的代理会报 `"degraded"` 而**不是** `"ok"`——不能用一个健康的 provider 掩盖另一个已经死掉的。每个 provider 还会报告 `refresh` 字段，token 被吊销时表现为 `consecutiveFailures` 持续上升，上游错误记录在 `lastError` 里。
 
 ---
 
@@ -155,7 +169,7 @@ curl -N https://your-proxy.example.com/v1/chat/completions \
 
 #### OpenAI 模型请求
 
-> **注意：** ChatGPT Backend 要求请求中必须包含 `system` message，否则会报错 `{"detail":"Instructions are required"}`。
+> **注意：** 早期的 Codex 模型会拒绝没有 `system` message 的请求（报 `{"detail":"Instructions are required"}`）。当前模型已不再如此（2026-07-31 在 gpt-5.4、gpt-5.4-mini、gpt-5.6-sol 上实测通过），因为代理会发送空的 `instructions` 字段。但仍建议带上 system message。
 
 > **注意：** ChatGPT Backend **不支持** `temperature`、`top_p` 和 `max_tokens` 参数。代理会自动丢弃这些字段，不会报错。如需控制输出质量，请改用 `reasoning_effort`。
 
@@ -254,8 +268,46 @@ curl https://your-proxy.example.com/v1/chat/completions \
 | 值 | 说明 |
 |---|---|
 | `"low"` | 快速响应，推理较浅，适合简单任务 |
-| `"medium"` | 默认值，均衡速度与质量 |
+| `"medium"` | 均衡速度与质量，多数模型的默认值 |
 | `"high"` | 深度推理，耗时更长，适合复杂问题 |
+| `"xhigh"` | 比 high 更深。当前所有 gpt-5.x 模型都支持 |
+| `"max"` | 仅 gpt-5.6 系列 |
+| `"ultra"` | 仅 gpt-5.6-sol / gpt-5.6-terra |
+
+> **档位是分模型的，且会变化。** 传入不支持的档位会被上游拒绝，报
+> `Unsupported value: 'max' is not supported with the 'gpt-5.4-mini' model`
+> ——代理不会校验也不会自动降级。下表是快照，不是承诺。
+
+核实于 2026-07-31：
+
+| 模型 | 默认 | 支持的档位 |
+|---|---|---|
+| `gpt-5.6-sol` | `low` | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-terra` | `medium` | low, medium, high, xhigh, max, ultra |
+| `gpt-5.6-luna` | `medium` | low, medium, high, xhigh, max |
+| `gpt-5.5` | `medium` | low, medium, high, xhigh |
+| `gpt-5.4` | `medium` | low, medium, high, xhigh |
+| `gpt-5.4-mini` | `medium` | low, medium, high, xhigh |
+
+权威来源就是 `/v1/models` 所依据的那份目录——每个条目都带有 `default_reasoning_level`
+和 `supported_reasoning_levels`。在服务器上可以这样直接查：
+
+```bash
+ACCESS_TOKEN=$(sudo python3 -c "import json;print(json.load(open('/opt/unified-proxy/auth.json'))['openai']['accessToken'])")
+curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.150.0" \
+  -H "authorization: Bearer $ACCESS_TOKEN" \
+  -H "originator: codex_cli_rs" -H "version: 0.150.0" \
+  | python3 -c "
+import sys, json
+for m in json.load(sys.stdin)['models']:
+    print(m['slug'], m.get('default_reasoning_level'),
+          [l['effort'] for l in m.get('supported_reasoning_levels', [])])
+"
+```
+
+> **注意**：客户端可能有自己的白名单。例如 n8n 的 OpenAI Chat Model 节点只提供
+> low/medium/high，且仅当模型名匹配 `(^o1([-\d]+)?$)|(^o[3-9].*)|(^gpt-5.*)` 时才
+> 显示该字段。要传 `xhigh` 及以上，需改用 HTTP Request 节点。
 
 > **不传时的行为**：不传 `reasoning_effort` 则使用后端默认（通常是 medium）。对于 o/gpt-5.x 系列，推理是始终开启的，该参数只控制推理深度。
 
