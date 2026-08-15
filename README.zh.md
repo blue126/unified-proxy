@@ -239,7 +239,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
 | `thinking.type` | 固定填 `"enabled"` |
 | `thinking.budget_tokens` | 允许思考消耗的最多 token 数，建议 5000–16000 |
 
-> **注意**：开启 `thinking` 时不能同时设置 `temperature`（两者不兼容，Anthropic API 会报错）。代理会自动处理这个冲突——有 `thinking` 时忽略 `temperature`。
+> **注意**：`temperature` 不会转发给 Anthropic。Claude 4-7 及以上的模型只接受默认值 `1`，传其他值一律返回 `` `temperature` is deprecated for this model ``，因此代理对所有走 Anthropic 的请求统一丢弃该字段，而不是让它变成 400。这同时也消除了以前 `thinking` 与 `temperature` 的冲突。
 
 > **适用模型**：claude-sonnet-4-6、claude-opus-4-6 等支持扩展思考的模型。haiku 系列不支持。
 
@@ -434,6 +434,7 @@ opencode
 | `OPENAI_ACCOUNT_ID` | _（空）_ | ChatGPT account ID。可选 —— ChatGPT 后端不强制要求该 header。 |
 | `ALERT_WEBHOOK_URL` | _（空）_ | 设置后，token 刷新失败与恢复会以 `{"text": "..."}` POST 到该地址（兼容 Slack/Discord）。告警在第 1、5、20 次及此后每 100 次连续失败时触发，不会每次重试都发。无论是否设置，失败都会写日志。 |
 | `CODEX_CLI_VERSION` | `0.150.0` | 上报给 ChatGPT 后端的 Codex CLI 版本号。它决定后端愿意提供哪些模型：新模型在此值提升前会被拒绝并提示 "requires a newer version of Codex"。 |
+| `LOG_ALL_REQUESTS` | _(未设置)_ | 设为 `1` 时记录所有请求，而不只是失败的。默认关闭，避免高频健康客户端的正常请求淹没 4xx/5xx 日志。 |
 
 ---
 
@@ -541,11 +542,12 @@ sudo journalctl -u unified-proxy -n 100
 ├── server.js              # 代理主程序
 ├── package.json
 ├── auth.json              # OAuth Token（由 PROXY_AUTH_FILE 指定）
-├── .env                   # PROXY_API_KEY、PORT、HOST、PROXY_AUTH_FILE
-└── deploy/
-    ├── unified-proxy.service  # systemd 单元文件
-    └── Caddyfile              # 反向代理 + TLS 配置
+└── .env                   # PROXY_API_KEY、PORT、HOST、PROXY_AUTH_FILE
 ```
+
+systemd 单元文件（`/etc/systemd/system/unified-proxy.service`）和 Caddy 配置
+（`/etc/caddy/Caddyfile`）不在这个目录下，也不由本仓库维护，而是由 Ansible
+模板渲染生成。
 
 ---
 

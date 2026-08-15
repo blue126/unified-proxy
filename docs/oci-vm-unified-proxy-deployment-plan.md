@@ -1,5 +1,10 @@
 # 计划：unified-proxy OCI VM 独立部署
 
+> **历史文档，已被取代。** 这份计划记录的是最初那次手工部署的方案，其中的
+> `deploy/` 目录已从仓库删除。systemd unit、Caddyfile、`.env` 现在全部由
+> Ansible 模板渲染（`IaC/ansible/roles/unified-proxy/templates/`），改配置请改
+> 那里，不要按本文重建 `deploy/`。保留此文仅为记录当时的决策过程。
+
 ## Context
 
 unified-proxy 目前以 Docker 容器形式运行在本地开发环境，绑定 `127.0.0.1:3456`，依赖 localhost 做安全边界，没有 API key 鉴权。目标是将其部署到 OCI VM 作为独立可复用服务，供本项目、其他 VPS 和本地 MacBook 调用。

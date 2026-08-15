@@ -24,6 +24,8 @@ const PORT = process.env.PORT || 3456;
 const HOST = process.env.HOST || '127.0.0.1';
 const VERSION = '5.0.0';
 const PROXY_API_KEY = process.env.PROXY_API_KEY || null;
+// Successful requests are logged only when this is set; failures always are.
+const LOG_ALL_REQUESTS = process.env.LOG_ALL_REQUESTS === '1';
 
 // ─── Anthropic OAuth ───
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
@@ -701,7 +703,7 @@ function convertMessages(messages, tools) {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleAnthropicChat(req, res, body) {
-  const { model, messages, temperature, max_tokens, tools, stream, thinking } = body;
+  const { model, messages, max_tokens, tools, stream, thinking } = body;
   const mappedModel = resolveAnthropicModel(model);
   const { system, messages: anthropicMessages } = convertMessages(messages, tools);
   const hasTools = tools && tools.length > 0;
@@ -745,11 +747,14 @@ async function handleAnthropicChat(req, res, body) {
     messages: anthropicMessages,
     max_tokens: max_tokens || 8192,
   };
-  // thinking requires temperature to be unset (Anthropic API restriction)
+  // temperature is never forwarded. Claude 4-7 and newer reject every value but
+  // the default 1 ("`temperature` is deprecated for this model"), and OpenAI
+  // clients send the field unconditionally — often with no way to turn it off —
+  // so honouring it turned every such request into a 400. Dropping it is lossless
+  // there (an absent field already means 1) and matches the OpenAI path, which
+  // drops the sampling params silently for the same reason.
   if (thinking) {
     requestBody.thinking = thinking;
-  } else if (temperature !== undefined) {
-    requestBody.temperature = temperature;
   }
 
   // For tool requests, use sync to ensure XML is filtered before sending
@@ -1443,10 +1448,59 @@ async function parseBody(req) {
   });
 }
 
+// ─── Request logging ───
+// Nothing upstream of the provider handlers used to log anything, so every
+// failure that stopped short of an upstream call — 401, 404, an unparseable
+// body — was invisible: a client that never got through looked exactly like a
+// client that never called. One hook on the response covers every branch,
+// streaming included.
+
+function clientIP(req) {
+  // Only Caddy, on localhost, can reach this port, so its X-Forwarded-For is
+  // both the sole source of the real address and safe to trust.
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.length > 0) return xff.split(',')[0].trim();
+  return req.socket?.remoteAddress || '-';
+}
+
+// Never log the presented key itself — journald keeps it for as long as the
+// journal survives. A short digest still separates "sent no key" from "same
+// wrong key retrying" from "a different wrong key every time".
+function keyFingerprint(req) {
+  const header = req.headers['authorization'] || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+  if (!token) return 'no-key';
+  return `sha256:${createHash('sha256').update(token).digest('hex').slice(0, 8)}`;
+}
+
+function logRequest(req, res, { method, path, startedAt, ip }) {
+  const status = res.statusCode;
+  // 8640 polls a day from a single healthy client would bury everything that
+  // matters, so successful requests stay quiet unless explicitly asked for.
+  if (!LOG_ALL_REQUESTS && status < 400) return;
+  const parts = [
+    `${method} ${path}`,
+    `${status}${res.writableFinished ? '' : ' (aborted)'}`,
+    `${Date.now() - startedAt}ms`,
+    `ip=${ip}`,
+    `ua="${req.headers['user-agent'] || '-'}"`,
+  ];
+  if (status === 401) parts.push(`key=${keyFingerprint(req)}`);
+  console.log(`[REQ] ${parts.join(' ')}`);
+}
+
 async function handleRequest(req, res) {
+  const startedAt = Date.now();
   const url = new URL(req.url, `http://${req.headers.host}`);
   const path = url.pathname;
   const method = req.method;
+
+  // 'close' rather than 'finish': it fires for responses the client abandoned
+  // mid-stream too, and writableFinished tells the two apart. The address is
+  // read now, not in the listener — an abandoned request has no socket left by
+  // the time it runs, which is exactly when knowing the caller matters most.
+  const ip = clientIP(req);
+  res.on('close', () => logRequest(req, res, { method, path, startedAt, ip }));
 
   if (method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' });
@@ -1527,8 +1581,15 @@ async function handleRequest(req, res) {
 
   // Chat completions — route by model
   if (path === '/v1/chat/completions' && method === 'POST') {
+    let body;
     try {
-      const body = await parseBody(req);
+      body = await parseBody(req);
+    } catch (e) {
+      // A body we cannot parse is the caller's mistake. This used to fall into
+      // the 500 below, which pointed diagnosis at the server instead.
+      return sendJSON(res, 400, { error: { message: e.message, type: 'invalid_request_error' } });
+    }
+    try {
       if (!body.messages) return sendJSON(res, 400, { error: { message: 'messages required' } });
       if (!body.model) body.model = DEFAULT_MODEL;
 

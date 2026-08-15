@@ -240,7 +240,7 @@ curl https://your-proxy.example.com/v1/chat/completions \
 | `thinking.type` | Must be `"enabled"` |
 | `thinking.budget_tokens` | Maximum tokens the model can spend on thinking. Recommended: 5000–16000 |
 
-> **Note:** `thinking` and `temperature` are mutually exclusive (Anthropic API restriction). The proxy handles this automatically — when `thinking` is present, `temperature` is ignored.
+> **Note:** `temperature` is never forwarded to Anthropic. Claude 4-7 and newer reject any value other than the default `1` with `` `temperature` is deprecated for this model ``, so the proxy drops the field for every Anthropic-routed request rather than turning it into a 400. This also resolves the old `thinking`/`temperature` conflict.
 
 > **Supported models:** claude-sonnet-4-6, claude-opus-4-6, and other models that support Extended Thinking. The haiku series does not support it.
 
@@ -440,6 +440,7 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 | `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID. Optional — the ChatGPT backend accepts requests without it. |
 | `ALERT_WEBHOOK_URL` | _(none)_ | If set, token-refresh failures and recoveries are POSTed here as `{"text": "..."}` (Slack/Discord-compatible). Alerts fire on the 1st, 5th, 20th and every 100th consecutive failure — not on every retry. Failures are always logged regardless. |
 | `CODEX_CLI_VERSION` | `0.150.0` | Codex CLI version reported to the ChatGPT backend. This gates which models the backend will serve: a newer model may be rejected with "requires a newer version of Codex" until this is raised. |
+| `LOG_ALL_REQUESTS` | _(unset)_ | Set to `1` to log every request, not just failures. Off by default so a frequent healthy poller cannot bury the 4xx/5xx lines. |
 
 ---
 
@@ -547,11 +548,12 @@ sudo journalctl -u unified-proxy -n 100
 ├── server.js              # main proxy server
 ├── package.json
 ├── auth.json              # OAuth tokens (pointed to by PROXY_AUTH_FILE)
-├── .env                   # PROXY_API_KEY, PORT, HOST, PROXY_AUTH_FILE
-└── deploy/
-    ├── unified-proxy.service  # systemd unit
-    └── Caddyfile              # reverse proxy + TLS config
+└── .env                   # PROXY_API_KEY, PORT, HOST, PROXY_AUTH_FILE
 ```
+
+The systemd unit (`/etc/systemd/system/unified-proxy.service`) and the Caddy
+config (`/etc/caddy/Caddyfile`) live outside this directory and are rendered
+from Ansible templates, not kept in this repository.
 
 ---
 
