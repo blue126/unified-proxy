@@ -551,11 +551,11 @@ sudo journalctl -u unified-proxy -n 100
 
 ## 持续部署（CD）
 
-推送到 `main` 分支后，GitHub Actions 自动通过 SSH 将最新代码部署到 OCI VM 并重启服务。每次部署后自动运行冒烟测试（健康检查 + 模型列表查询）验证服务可用。某个 provider 处于降级状态时会输出警告，但不会让部署失败——凭据失效不属于部署回归。
+推送到 `main` 分支后，GitHub Actions 自动通过 SSH 将最新代码部署到 OCI VM 并重启服务。每次部署后都会运行下文所述的真实 provider 冒烟测试。只有一个 provider 不可用时输出警告且不让部署失败；仅当两个上游 provider 均不可用时才让部署失败。
 
 ### 监控
 
-`.github/workflows/monitor.yml` 每 6 小时运行一次（也可在 **Actions → Monitor deployed proxy → Run workflow** 手动触发）。任一 provider 不健康时它会失败并由 GitHub 通知你，同时报告连续刷新失败次数和最后一次刷新错误，随后运行真实推理冒烟测试。
+`.github/workflows/monitor.yml` 每 6 小时运行一次（也可在 **Actions → Monitor deployed proxy → Run workflow** 手动触发）。它会分别检查每个 provider 的健康状态、模型发现和真实推理，并对错误分类（例如 API 不可达、认证失败、限流或额度耗尽），同时写入日志和 Actions Step Summary。只有一个 provider 失败时输出 warning；仅当两个 provider 全部失败时 workflow 才会失败。
 
 之所以需要它，是因为这个代理的两半都会**无声腐化**：OAuth refresh token 可能在任意时刻被上游吊销，OpenAI 也会不加通知地下架模型。这两种情况都不表现为「服务挂了」——进程照常运行、照常响应，只是再也做不了任何有用的事。在服务器上设置 `ALERT_WEBHOOK_URL` 可在定时检查之外获得即时推送告警。
 
@@ -637,6 +637,8 @@ BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx npm run smoke
 ```
 
 通过 `/v1/models` 各取一个当前可用的模型，发送真实请求并验证返回了非空内容。模型 id 在运行时解析而非硬编码，因此上游下架某个 slug 时脚本不会随之失效。可用 `SMOKE_ANTHROPIC_MODEL` / `SMOKE_OPENAI_MODEL` 指定特定模型。
+
+脚本会给出每个 provider 的具体失败原因；只要上游返回了相应信息，还会显示 HTTP 状态、错误类型、订阅计划和额度重置时间。恰好一个 provider 失败时脚本以成功状态退出并产生 warning；只有两个 provider 都失败（或测试配置本身无效）时才以失败状态退出。
 
 ---
 

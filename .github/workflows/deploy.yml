@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
@@ -44,27 +46,6 @@ jobs:
 
       - name: Smoke test
         env:
-          PROXY_DOMAIN: ${{ secrets.PROXY_DOMAIN }}
+          BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
-        run: |
-          BASE="https://${PROXY_DOMAIN}"
-
-          echo "--- Health check ---"
-          HEALTH=$(curl -sf "${BASE}/health")
-          STATUS=$(echo "$HEALTH" | python3 -c "import sys,json; print(json.load(sys.stdin)['status'])")
-          echo "status: $STATUS"
-          # A provider whose credentials are dead is not a deploy regression, so
-          # this does not fail the deploy — but it must be visible, not silent.
-          # The scheduled monitor workflow is what fails on a degraded provider.
-          UNHEALTHY=$(echo "$HEALTH" | python3 -c "import sys,json; print(','.join(json.load(sys.stdin).get('unhealthyProviders',[])))")
-          [ -z "$UNHEALTHY" ] || echo "::warning::Degraded providers after deploy: ${UNHEALTHY}"
-          [ "$STATUS" = "ok" ] || [ "$STATUS" = "degraded" ] || (echo "Health check failed (status=$STATUS)"; exit 1)
-
-          echo "--- Models list ---"
-          COUNT=$(curl -sf "${BASE}/v1/models" \
-            -H "Authorization: Bearer ${PROXY_API_KEY}" \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d['data']))")
-          echo "models available: $COUNT"
-          [ "$COUNT" -gt 0 ] || (echo "No models returned"; exit 1)
-
-          echo "Smoke test passed"
+        run: ./scripts/smoke.sh

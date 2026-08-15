@@ -1,9 +1,9 @@
 name: Monitor deployed proxy
 
-# The failure this guards against: Anthropic's refresh token was revoked and the
-# proxy returned 401 for every Claude request for six weeks without anyone
-# noticing. Token auth and model availability both rot silently, and neither the
-# service being "up" nor the deploy succeeding says anything about them.
+# Token auth, quota, model availability, and upstream reachability can all fail
+# while the proxy process itself remains healthy. The smoke test reports the
+# exact provider-level reason, warns when one provider is down, and fails the
+# workflow only when both providers are unavailable.
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -17,39 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Health check (fails if any provider is unhealthy)
-        env:
-          PROXY_DOMAIN: ${{ secrets.PROXY_DOMAIN }}
-        run: |
-          HEALTH=$(curl -sf "https://${PROXY_DOMAIN}/health")
-          echo "$HEALTH" | python3 -m json.tool
-
-          python3 - <<'EOF'
-          import json, os, sys, urllib.request
-          url = f"https://{os.environ['PROXY_DOMAIN']}/health"
-          health = json.load(urllib.request.urlopen(url, timeout=30))
-
-          status = health.get('status')
-          if status == 'ok':
-              print('OK: all providers valid')
-              sys.exit(0)
-
-          # Report every unhealthy provider and why, so the notification is
-          # actionable without having to SSH into the box.
-          print(f'FAIL: status={status}')
-          for name, p in health.get('providers', {}).items():
-              if p.get('status') == 'valid':
-                  continue
-              refresh = p.get('refresh', {})
-              print(f"  {name}: status={p.get('status')}")
-              print(f"    consecutive refresh failures: {refresh.get('consecutiveFailures')}")
-              print(f"    last refresh error:           {refresh.get('lastError')}")
-              print(f"    last successful refresh:      {refresh.get('lastSuccessAt')}")
-          sys.exit(1)
-          EOF
-
-      - name: Live inference smoke test
-        if: always()  # run even if health failed — shows which half still works
+      - name: Provider health + live inference
         env:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}

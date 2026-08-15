@@ -29,6 +29,12 @@ const SERVER = join(__dirname, '..', 'server.js');
 const PORT = 13456;
 const KEY = 'test-key-unified-proxy';
 const BASE = `http://127.0.0.1:${PORT}`;
+// Keep the spawned server from finding a developer's real Claude credentials
+// through ~/.claude, the legacy auth location, or the macOS Keychain. The test
+// suite deliberately starts without upstream tokens and must not make live API
+// calls just because the machine running it happens to be logged in.
+const TEST_HOME = `/tmp/unified-proxy-test-home-${process.pid}`;
+const EMPTY_PATH = '/nonexistent';
 
 let proc;
 
@@ -55,11 +61,13 @@ function post(data, extra = {}) {
 }
 
 async function startServer(extraEnv = {}) {
-  const p = spawn('node', [SERVER], {
+  const p = spawn(process.execPath, [SERVER], {
     env: {
       ...process.env,
       PORT: String(PORT),
       HOST: '127.0.0.1',
+      HOME: TEST_HOME,
+      PATH: EMPTY_PATH,
       PROXY_API_KEY: KEY,
       PROXY_AUTH_FILE: '/nonexistent/test-auth.json',
       CLAUDE_ACCESS_TOKEN: '',

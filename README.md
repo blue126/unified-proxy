@@ -557,11 +557,11 @@ sudo journalctl -u unified-proxy -n 100
 
 ## Continuous Deployment (CD)
 
-Push to `main` → GitHub Actions automatically deploys to the OCI VM and restarts the service. A smoke test (health check + models list) runs after each deploy to verify the endpoint is up. A degraded provider is reported as a warning but does not fail the deploy — dead credentials are not a deploy regression.
+Push to `main` → GitHub Actions automatically deploys to the OCI VM and restarts the service. The same live provider smoke test described below runs after each deploy. One unavailable provider produces a warning without failing the deploy; the deploy fails only when both upstream providers are unavailable.
 
 ### Monitoring
 
-`.github/workflows/monitor.yml` runs every 6 hours (and on demand via **Actions → Monitor deployed proxy → Run workflow**). It fails — and GitHub notifies you — when any provider is unhealthy, reporting the consecutive refresh-failure count and the last refresh error. It then runs the live inference smoke test.
+`.github/workflows/monitor.yml` runs every 6 hours (and on demand via **Actions → Monitor deployed proxy → Run workflow**). It checks health, model discovery, and live inference for each provider. Provider errors are classified (for example, unreachable API, authentication failure, rate limit, or exhausted quota) and written to both the log and the Actions step summary. One failed provider emits a warning; the workflow fails only when both providers fail.
 
 This exists because both halves of this proxy rot silently. An OAuth refresh token can be revoked upstream at any time, and OpenAI retires model slugs without notice. Neither shows up as the service being down: the process keeps running and answering, it just stops being able to do anything useful. Set `ALERT_WEBHOOK_URL` on the server for immediate push alerts in addition to the scheduled check.
 
@@ -643,6 +643,8 @@ BASE_URL=https://proxy.example.com PROXY_API_KEY=xxx npm run smoke
 ```
 
 Picks the first available model from each provider via `/v1/models`, sends a real prompt, and verifies a non-empty response is returned. Model ids are resolved at runtime rather than hardcoded, so the script does not rot when a provider retires a slug. Pin a specific model with `SMOKE_ANTHROPIC_MODEL` / `SMOKE_OPENAI_MODEL`.
+
+The script reports the specific failure reason for each provider, including HTTP status, upstream error type, plan, and quota reset time when available. It exits successfully with a warning when exactly one provider fails, and exits with an error only when both providers fail (or the test configuration itself is invalid).
 
 ---
 
