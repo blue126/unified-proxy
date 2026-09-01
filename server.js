@@ -110,6 +110,8 @@ const CONNECT_TIMEOUT_MS = 10_000;  // 10s connect timeout
 const REFRESH_CHECK_INTERVAL = 30 * 60 * 1000;  // 30 min
 const REFRESH_AHEAD_MS = 2 * 60 * 60 * 1000;    // 2 hours before expiry
 const REFRESH_TIMEOUT_MS = 30_000;              // cap on a single token refresh call
+const REFRESH_BACKOFF_BASE_MS = 60_000;         // 1 min after first transient failure
+const REFRESH_BACKOFF_MAX_MS = 30 * 60 * 1000;  // cap retries at the background interval
 
 // ─── Token caching (per-provider) ───
 let cachedTokens = { anthropic: null, openai: null };
@@ -442,14 +444,24 @@ function saveTokensForProvider(tokens, provider) {
 }
 
 async function getOAuthTokens(provider = 'anthropic') {
-  if (cachedTokens[provider] && Date.now() < tokenExpiry[provider] - 300000) {
-    return cachedTokens[provider];
-  }
-
   let oauth = loadTokensForProvider(provider);
   if (!oauth?.accessToken) {
     const loginCmd = provider === 'anthropic' ? '--login' : `--login ${provider}`;
     throw new Error(`No ${provider} OAuth tokens found. Run "node server.js ${loginCmd}" on the host to authorize.`);
+  }
+
+  // Read the file before consulting the cache so replacing auth.json can clear
+  // a permanent refresh-token circuit without requiring a process restart.
+  // The replacement token itself is never exposed through /health or logs.
+  refreshAttemptDecision(provider, oauth.refreshToken);
+  const state = refreshState[provider];
+  if (state.reauthRequired) throw refreshUnavailableError(provider, state);
+
+  if (
+    cachedTokens[provider]?.accessToken === oauth.accessToken &&
+    Date.now() < tokenExpiry[provider] - 300000
+  ) {
+    return cachedTokens[provider];
   }
 
   // Auto-refresh if within 5 min of expiry or already expired
@@ -461,8 +473,12 @@ async function getOAuthTokens(provider = 'anthropic') {
       tokenExpiry[provider] = refreshed.expiresAt;
       return refreshed;
     }
-    const loginCmd = provider === 'anthropic' ? '--login' : `--login ${provider}`;
-    console.error(`[${provider.toUpperCase()} TOKEN] Refresh failed, using expired token. Re-run "node server.js ${loginCmd}".`);
+    if (state.reauthRequired || Date.now() >= oauth.expiresAt) {
+      throw refreshUnavailableError(provider, state);
+    }
+  } else if (oauth.expiresAt && Date.now() >= oauth.expiresAt && !oauth.refreshToken) {
+    noteRefreshFailure(provider, 'OAuth access token expired and no refresh token is available', { permanent: true });
+    throw refreshUnavailableError(provider, state);
   }
 
   // Token health logging
@@ -480,12 +496,25 @@ async function getOAuthTokens(provider = 'anthropic') {
   return oauth;
 }
 
+function createRefreshState() {
+  return {
+    consecutiveFailures: 0,
+    lastError: null,
+    lastFailureAt: null,
+    lastSuccessAt: null,
+    nextRetryAt: null,
+    reauthRequired: false,
+    // Internal-only circuit key. Never include it in health responses or logs.
+    failedRefreshToken: null,
+  };
+}
+
 // Refresh state per provider, surfaced on /health so a broken refresh chain is
 // visible instead of silent. A dead provider used to be invisible: /health still
 // reported "ok" as long as the *other* provider was alive.
 const refreshState = {
-  anthropic: { consecutiveFailures: 0, lastError: null, lastFailureAt: null, lastSuccessAt: null },
-  openai:    { consecutiveFailures: 0, lastError: null, lastFailureAt: null, lastSuccessAt: null },
+  anthropic: createRefreshState(),
+  openai:    createRefreshState(),
 };
 
 // In-flight refresh per provider. Both the background loop and the request path
@@ -494,30 +523,114 @@ const refreshState = {
 // server implementing reuse detection may revoke the whole token family.
 const inFlightRefresh = {};
 
+function classifyRefreshFailure(status, body = '') {
+  const signal = String(body).toLowerCase();
+  const invalidRefreshToken = [
+    'invalid_grant',
+    'refresh token expired',
+    'refresh token revoked',
+    'refresh token not found or invalid',
+    'invalid refresh token',
+  ].some(marker => signal.includes(marker));
+  return ((status === 400 || status === 401) && invalidRefreshToken) ? 'permanent' : 'transient';
+}
+
+function refreshRetryDelayMs(consecutiveFailures) {
+  const exponent = Math.max(0, consecutiveFailures - 1);
+  return Math.min(REFRESH_BACKOFF_BASE_MS * (2 ** exponent), REFRESH_BACKOFF_MAX_MS);
+}
+
+function recordRefreshFailure(state, { error, permanent = false, refreshToken = null, now = Date.now() }) {
+  state.consecutiveFailures += 1;
+  state.lastError = error;
+  state.lastFailureAt = now;
+  state.failedRefreshToken = refreshToken;
+  if (permanent) {
+    state.reauthRequired = true;
+    state.nextRetryAt = null;
+  } else {
+    state.nextRetryAt = now + refreshRetryDelayMs(state.consecutiveFailures);
+  }
+  return state;
+}
+
+function refreshDecisionForState(state, refreshToken, now = Date.now()) {
+  if (
+    state.consecutiveFailures > 0 &&
+    refreshToken &&
+    (!state.failedRefreshToken || state.failedRefreshToken !== refreshToken)
+  ) {
+    return { allowed: true, reason: 'credentials_replaced' };
+  }
+  if (state.reauthRequired) {
+    return { allowed: false, reason: 'reauth_required' };
+  }
+  if (state.nextRetryAt && now < state.nextRetryAt) {
+    return { allowed: false, reason: 'backoff', nextRetryAt: state.nextRetryAt };
+  }
+  return { allowed: true, reason: state.consecutiveFailures > 0 ? 'retry_due' : 'healthy' };
+}
+
+function clearRefreshFailures(provider, { success = false } = {}) {
+  const state = refreshState[provider];
+  state.consecutiveFailures = 0;
+  state.lastError = null;
+  state.nextRetryAt = null;
+  state.reauthRequired = false;
+  state.failedRefreshToken = null;
+  if (success) state.lastSuccessAt = Date.now();
+}
+
+function refreshAttemptDecision(provider, refreshToken, now = Date.now()) {
+  const state = refreshState[provider];
+  const decision = refreshDecisionForState(state, refreshToken, now);
+  if (decision.reason === 'credentials_replaced') {
+    console.log(`[${provider.toUpperCase()} TOKEN REFRESH] New credentials detected; clearing re-authentication circuit`);
+    clearRefreshFailures(provider);
+    return { allowed: true, reason: 'credentials_replaced' };
+  }
+  return decision;
+}
+
+function refreshUnavailableError(provider, state = refreshState[provider]) {
+  const displayName = provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+  const loginTarget = provider === 'anthropic' ? 'anthropic' : provider;
+  let message;
+  let code;
+  if (state.reauthRequired) {
+    code = 'reauth_required';
+    message = `${displayName} OAuth credentials require re-authentication. Run "node server.js --login ${loginTarget}" and install the new credentials on the host.`;
+  } else {
+    code = 'refresh_backoff';
+    const retryAt = state.nextRetryAt ? new Date(state.nextRetryAt).toISOString() : 'the next scheduled attempt';
+    message = `${displayName} OAuth token refresh is temporarily unavailable; retry after ${retryAt}.`;
+  }
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 function noteRefreshSuccess(provider) {
   const s = refreshState[provider];
   if (s.consecutiveFailures > 0) {
     console.log(`[${provider.toUpperCase()} TOKEN REFRESH] Recovered after ${s.consecutiveFailures} failure(s)`);
     sendAlert(`${provider} token refresh recovered after ${s.consecutiveFailures} failure(s).`);
   }
-  s.consecutiveFailures = 0;
-  s.lastError = null;
-  s.lastSuccessAt = Date.now();
+  clearRefreshFailures(provider, { success: true });
 }
 
-function noteRefreshFailure(provider, error) {
+function noteRefreshFailure(provider, error, { permanent = false, refreshToken = null } = {}) {
   const s = refreshState[provider];
-  s.consecutiveFailures += 1;
-  s.lastError = error;
-  s.lastFailureAt = Date.now();
-  // Alert on the first failure, then back off geometrically. The old behaviour
-  // logged ~2000 identical failures over six weeks and told nobody.
+  const wasPermanent = s.reauthRequired;
+  recordRefreshFailure(s, { error, permanent, refreshToken });
   const n = s.consecutiveFailures;
-  if (n === 1 || n === 5 || n === 20 || (n % 100 === 0)) {
+  if (permanent && !wasPermanent) {
     sendAlert(
-      `${provider} token refresh FAILED ${n}x (latest: ${error}). ` +
-      `Re-authenticate with "node server.js --login ${provider}".`
+      `${provider} token refresh permanently failed (${error}). ` +
+      `Automatic retries are stopped; re-authenticate with "node server.js --login ${provider}".`
     );
+  } else if (!permanent && (n === 1 || n === 5 || n === 20 || (n % 100 === 0))) {
+    sendAlert(`${provider} token refresh FAILED ${n}x (latest: ${error}); retrying with backoff.`);
   }
 }
 
@@ -537,6 +650,17 @@ function sendAlert(message) {
 }
 
 function doRefreshToken(refreshTok, provider = 'anthropic') {
+  if (!refreshTok) {
+    const state = refreshState[provider];
+    if (!state.reauthRequired) {
+      noteRefreshFailure(provider, 'No refresh token is available', { permanent: true });
+    }
+    return Promise.resolve(null);
+  }
+
+  const decision = refreshAttemptDecision(provider, refreshTok);
+  if (!decision.allowed) return Promise.resolve(null);
+
   // Coalesce: a concurrent caller joins the running refresh instead of starting
   // a second one with the same (single-use) token.
   if (inFlightRefresh[provider]) {
@@ -588,7 +712,8 @@ async function doRefreshTokenUncoalesced(refreshTok, provider = 'anthropic') {
     if (!response.ok) {
       const err = await response.text();
       console.error(`[${provider.toUpperCase()} TOKEN REFRESH FAILED] Status ${response.status}: ${err}`);
-      noteRefreshFailure(provider, `HTTP ${response.status}: ${err.slice(0, 200)}`);
+      const permanent = classifyRefreshFailure(response.status, err) === 'permanent';
+      noteRefreshFailure(provider, `HTTP ${response.status}: ${err.slice(0, 200)}`, { permanent, refreshToken: refreshTok });
       return null;
     }
     const data = await response.json();
@@ -604,7 +729,7 @@ async function doRefreshTokenUncoalesced(refreshTok, provider = 'anthropic') {
     // the token before we gave up, in which case our stored copy is now dead.
     const detail = e.name === 'AbortError' ? `timed out after ${REFRESH_TIMEOUT_MS}ms` : e.message;
     console.error(`[${provider.toUpperCase()} TOKEN REFRESH ERROR] ${detail}`);
-    noteRefreshFailure(provider, detail);
+    noteRefreshFailure(provider, detail, { refreshToken: refreshTok });
     return null;
   } finally {
     clearTimeout(timer);
@@ -1366,6 +1491,13 @@ async function handleOpenAIChat(req, res, body) {
           response = await makeUpstreamRequest(tokens);
         }
       }
+      if (refreshState.openai.reauthRequired) {
+        const authError = refreshUnavailableError('openai');
+        return sendJSON(res, 503, { error: {
+          message: authError.message,
+          type: 'provider_unavailable',
+        } });
+      }
       if (response.status === 401) {
         return sendJSON(res, 503, { error: {
           message: 'OpenAI authentication failed after refresh. Re-run "node server.js --login openai".',
@@ -1611,18 +1743,27 @@ async function handleRequest(req, res) {
           providerStatus[provider] = { status: 'valid', hoursRemaining: null };
         }
       } catch (e) {
-        providerStatus[provider] = { status: 'unavailable', error: e.message };
+        providerStatus[provider] = {
+          status: e.code === 'reauth_required' ? 'reauth_required' : 'unavailable',
+          error: e.message,
+        };
       }
     }
     // Attach refresh health so a broken chain is visible even while the token
     // itself still looks valid.
     for (const provider of ['anthropic', 'openai']) {
       const s = refreshState[provider];
+      const now = Date.now();
+      const refreshStatus = s.reauthRequired
+        ? 'reauth_required'
+        : (s.nextRetryAt && now < s.nextRetryAt ? 'backoff' : (s.consecutiveFailures > 0 ? 'retry_due' : 'healthy'));
       providerStatus[provider].refresh = {
+        status: refreshStatus,
         consecutiveFailures: s.consecutiveFailures,
         lastError: s.lastError,
         lastSuccessAt: s.lastSuccessAt ? new Date(s.lastSuccessAt).toISOString() : null,
         lastFailureAt: s.lastFailureAt ? new Date(s.lastFailureAt).toISOString() : null,
+        nextRetryAt: s.nextRetryAt ? new Date(s.nextRetryAt).toISOString() : null,
       };
     }
 
@@ -1976,6 +2117,7 @@ if (!isDirectRun) {
         const oauth = loadTokensForProvider(provider);
         if (!oauth?.refreshToken || !oauth.expiresAt) continue;
         if (Date.now() < oauth.expiresAt - REFRESH_AHEAD_MS) continue;
+        if (!refreshAttemptDecision(provider, oauth.refreshToken).allowed) continue;
         console.log(`[BG REFRESH ${provider.toUpperCase()}] Token expiring soon, refreshing...`);
         const refreshed = await doRefreshToken(oauth.refreshToken, provider);
         if (refreshed) {
@@ -2005,6 +2147,11 @@ export {
   routeRequest,
   convertMessages,
   buildAnthropicContent,
+  classifyRefreshFailure,
+  createRefreshState,
+  recordRefreshFailure,
+  refreshDecisionForState,
+  refreshRetryDelayMs,
   registerModelProviders,
   stripPrefix,
 };

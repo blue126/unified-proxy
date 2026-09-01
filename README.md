@@ -71,12 +71,12 @@ curl https://your-proxy.example.com/health
     "anthropic": {
       "status": "valid",
       "hoursRemaining": 23.4,
-      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null }
+      "refresh": { "status": "healthy", "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null, "nextRetryAt": null }
     },
     "openai": {
       "status": "valid",
       "hoursRemaining": 11.2,
-      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null }
+      "refresh": { "status": "healthy", "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null, "nextRetryAt": null }
     }
   }
 }
@@ -89,6 +89,8 @@ curl https://your-proxy.example.com/health
 | `"down"` | No provider is usable |
 
 A partly-broken proxy reports `"degraded"`, **not** `"ok"` — one healthy provider must not mask a dead one. Each provider also reports `refresh`, so a revoked token is visible as a rising `consecutiveFailures` with the upstream error in `lastError`.
+
+Transient refresh failures use exponential backoff from 1 minute to 30 minutes; request traffic does not bypass that delay. A definite `invalid_grant` or expired/revoked refresh token changes the provider and refresh status to `"reauth_required"`, stops automatic refresh attempts, and makes provider requests return a clear 503 until a different refresh token is installed (or the service restarts with new credentials).
 
 ---
 
