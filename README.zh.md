@@ -71,12 +71,12 @@ curl https://your-proxy.example.com/health
     "anthropic": {
       "status": "valid",
       "hoursRemaining": 23.4,
-      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null }
+      "refresh": { "status": "healthy", "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-31T01:34:39.000Z", "lastFailureAt": null, "nextRetryAt": null }
     },
     "openai": {
       "status": "valid",
       "hoursRemaining": 11.2,
-      "refresh": { "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null }
+      "refresh": { "status": "healthy", "consecutiveFailures": 0, "lastError": null, "lastSuccessAt": "2026-07-26T05:11:06.000Z", "lastFailureAt": null, "nextRetryAt": null }
     }
   }
 }
@@ -89,6 +89,8 @@ curl https://your-proxy.example.com/health
 | `"down"` | 没有任何 provider 可用 |
 
 部分损坏的代理会报 `"degraded"` 而**不是** `"ok"`——不能用一个健康的 provider 掩盖另一个已经死掉的。每个 provider 还会报告 `refresh` 字段，token 被吊销时表现为 `consecutiveFailures` 持续上升，上游错误记录在 `lastError` 里。
+
+临时续期失败采用从 1 分钟到 30 分钟的指数退避，业务请求不会绕过等待时间。明确的 `invalid_grant`、refresh token 过期或被吊销会将 provider 和 refresh 状态设为 `"reauth_required"`，停止自动续期，并让该 provider 的请求直接返回清晰的 503；安装不同的 refresh token（或用新凭证重启服务）后才会恢复。
 
 ---
 

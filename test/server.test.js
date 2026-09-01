@@ -22,7 +22,17 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { convertToCodexRequest, buildUserContent, convertMessages, buildAnthropicContent } from '../server.js';
+import {
+  convertToCodexRequest,
+  buildUserContent,
+  convertMessages,
+  buildAnthropicContent,
+  classifyRefreshFailure,
+  createRefreshState,
+  recordRefreshFailure,
+  refreshDecisionForState,
+  refreshRetryDelayMs,
+} from '../server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(__dirname, '..', 'server.js');
@@ -135,9 +145,74 @@ describe('Health check', () => {
       const refresh = body.providers[provider]?.refresh;
       assert.ok(refresh, `${provider} should report refresh state`);
       assert.equal(typeof refresh.consecutiveFailures, 'number');
+      assert.ok(['healthy', 'backoff', 'retry_due', 'reauth_required'].includes(refresh.status));
       assert.ok('lastError' in refresh);
       assert.ok('lastSuccessAt' in refresh);
+      assert.ok('nextRetryAt' in refresh);
     }
+  });
+});
+
+describe('OAuth refresh failure policy', () => {
+  test('invalid_grant and invalid refresh-token responses are permanent', () => {
+    assert.equal(classifyRefreshFailure(400, '{"error":"invalid_grant"}'), 'permanent');
+    assert.equal(classifyRefreshFailure(401, 'Refresh token revoked'), 'permanent');
+    assert.equal(classifyRefreshFailure(400, 'Refresh token not found or invalid'), 'permanent');
+  });
+
+  test('timeouts, rate limits, server errors, and unrelated 4xx responses are transient', () => {
+    assert.equal(classifyRefreshFailure(0, 'timed out'), 'transient');
+    assert.equal(classifyRefreshFailure(429, 'rate limited'), 'transient');
+    assert.equal(classifyRefreshFailure(503, 'unavailable'), 'transient');
+    assert.equal(classifyRefreshFailure(400, 'invalid_client'), 'transient');
+  });
+
+  test('transient failures use capped exponential backoff', () => {
+    assert.equal(refreshRetryDelayMs(1), 60_000);
+    assert.equal(refreshRetryDelayMs(2), 120_000);
+    assert.equal(refreshRetryDelayMs(5), 960_000);
+    assert.equal(refreshRetryDelayMs(6), 1_800_000);
+    assert.equal(refreshRetryDelayMs(100), 1_800_000);
+  });
+
+  test('backoff blocks request-triggered retries until the deadline', () => {
+    const state = createRefreshState();
+    recordRefreshFailure(state, {
+      error: 'temporary network failure',
+      refreshToken: 'refresh-a',
+      now: 1_000,
+    });
+
+    assert.deepEqual(refreshDecisionForState(state, 'refresh-a', 60_999), {
+      allowed: false,
+      reason: 'backoff',
+      nextRetryAt: 61_000,
+    });
+    assert.deepEqual(refreshDecisionForState(state, 'refresh-a', 61_000), {
+      allowed: true,
+      reason: 'retry_due',
+    });
+  });
+
+  test('permanent failure stays open until a different refresh token is installed', () => {
+    const state = createRefreshState();
+    recordRefreshFailure(state, {
+      error: 'HTTP 400: invalid_grant',
+      permanent: true,
+      refreshToken: 'refresh-a',
+      now: 1_000,
+    });
+
+    assert.equal(state.reauthRequired, true);
+    assert.equal(state.nextRetryAt, null);
+    assert.deepEqual(refreshDecisionForState(state, 'refresh-a', 999_999_999), {
+      allowed: false,
+      reason: 'reauth_required',
+    });
+    assert.deepEqual(refreshDecisionForState(state, 'refresh-b', 2_000), {
+      allowed: true,
+      reason: 'credentials_replaced',
+    });
   });
 });
 
@@ -270,7 +345,7 @@ describe('OpenAI env var fallback', () => {
       authed(post({ model: 'gpt-5.4', messages: [{ role: 'user', content: 'hi' }] })));
     assert.equal(status, 503);
     assert.doesNotMatch(body.error.message, /accountId/i);
-    assert.match(body.error.message, /authentication failed/i);
+    assert.match(body.error.message, /require re-authentication/i);
   });
 
   test('OPENAI_ACCESS_TOKEN + OPENAI_ACCOUNT_ID set → token loads, request reaches upstream', async () => {
@@ -284,10 +359,11 @@ describe('OpenAI env var fallback', () => {
     assert.notEqual(status, 401, 'should not fail proxy auth');
     assert.notEqual(status, 400, 'should not fail validation');
     // Token was loaded and accountId passed — request reached upstream.
-    // With a fake token, upstream returns 401 → refresh fails → 503 "authentication failed after refresh".
+    // With a fake token, upstream returns 401 and no refresh token exists, so
+    // the provider enters the explicit re-authentication-required state.
     // This is distinct from "no token" 503 (getOAuthTokens throws) or "missing accountId" 503.
     if (status === 503) {
-      assert.match(body.error.message, /authentication failed after refresh/i,
+      assert.match(body.error.message, /require re-authentication/i,
         'expected upstream auth failure, not a "no token" or "missing accountId" error');
     }
   });
