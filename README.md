@@ -136,12 +136,22 @@ Content-Type: application/json
 
 Fully compatible with the OpenAI Chat Completions API. Supports streaming, system prompts, and tool calls.
 
-**Model routing** is automatic based on model name prefix:
+**Model routing** uses this precedence:
 
-| Model prefix | Routes to |
-|---|---|
-| `gpt-`, `o1`, `o3`, `o4`, `codex-` | OpenAI (ChatGPT Backend) |
-| Everything else | Anthropic (Claude API) |
+1. Explicit `openai/<model>` or `anthropic/<model>` namespace. The namespace is removed before the upstream request.
+2. Provider ownership learned from the live model catalogs returned by OpenAI and Anthropic.
+3. Legacy compatibility rules: `gpt-*`, `o<number>*`, and `codex-*` route to OpenAI; `claude-*` and the documented Claude aliases route to Anthropic.
+4. An unknown or ambiguous unprefixed model returns HTTP 400 with instructions to add an explicit namespace. It is never silently sent to the wrong provider.
+
+Use an explicit namespace when calling a newly released model before its catalog ownership has been learned:
+
+```json
+{ "model": "openai/future-model", "messages": [{ "role": "user", "content": "Hello" }] }
+```
+
+```json
+{ "model": "anthropic/future-model", "messages": [{ "role": "user", "content": "Hello" }] }
+```
 
 #### Non-streaming example
 
@@ -423,7 +433,7 @@ opencode
 # Press 'p' to open provider selection, then choose "Unified Proxy"
 ```
 
-You can use any model listed under `models`. The model name is passed through to this proxy, which routes it to the correct upstream provider automatically.
+You can use any model listed under `models`. The proxy routes catalog models by their recorded ownership; for a new or manually configured model, use `openai/<model>` or `anthropic/<model>` explicitly.
 
 ---
 

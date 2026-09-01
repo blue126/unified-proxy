@@ -136,12 +136,22 @@ Content-Type: application/json
 
 完全兼容 OpenAI Chat Completions API，支持流式输出、系统提示词和工具调用。
 
-**路由规则**（根据模型名前缀自动判断）：
+**模型路由优先级：**
 
-| 模型前缀 | 路由目标 |
-|---|---|
-| `gpt-`、`o1`、`o3`、`o4`、`codex-` | OpenAI（ChatGPT Backend）|
-| 其他所有模型 | Anthropic（Claude API）|
+1. 显式的 `openai/<model>` 或 `anthropic/<model>` 命名空间；发送上游前会移除命名空间。
+2. 从 OpenAI、Anthropic 实时模型目录中记录的 provider 归属。
+3. 旧规则兼容：`gpt-*`、`o<数字>*`、`codex-*` 进入 OpenAI；`claude-*` 和已记录的 Claude 别名进入 Anthropic。
+4. 无法识别或同时属于两个 provider 的无前缀模型返回 HTTP 400，并提示添加显式命名空间；不再静默发给错误的 provider。
+
+新模型发布、目录归属尚未加载时，可以直接指定 provider：
+
+```json
+{ "model": "openai/future-model", "messages": [{ "role": "user", "content": "你好" }] }
+```
+
+```json
+{ "model": "anthropic/future-model", "messages": [{ "role": "user", "content": "你好" }] }
+```
 
 #### 非流式请求
 
@@ -417,7 +427,7 @@ opencode
 # 按 'p' 打开 provider 选择菜单，选择 "Unified Proxy"
 ```
 
-`models` 列表中的模型名称会原样传递给本代理，由代理自动路由到对应的上游服务（Anthropic 或 OpenAI）。
+`models` 列表中的模型会按实时目录记录的归属自动路由；新发布或手工配置的模型可用 `openai/<model>` 或 `anthropic/<model>` 明确指定。
 
 ---
 
