@@ -119,14 +119,77 @@ let tokenExpiry = { anthropic: 0, openai: 0 };
 // §1  Model Routing
 // ═══════════════════════════════════════════════════════════════
 
-function routeRequest(model) {
-  const bare = stripPrefix(model);
-  if (/^(gpt-|o1|o3|o4|codex-)/.test(bare)) return 'openai';
-  return 'anthropic';
+// A model can be learned from both upstream catalogs. Store a set rather than
+// letting the last refresh win: a collision is ambiguous and must be resolved
+// by an explicit provider prefix.
+const modelProviderRegistry = new Map();
+
+function parseModelIdentifier(model) {
+  const raw = String(model || '').trim();
+  const match = /^(openai|anthropic)\/(.+)$/.exec(raw);
+  return match
+    ? { bare: match[2], explicitProvider: match[1] }
+    : { bare: raw, explicitProvider: null };
 }
 
 function stripPrefix(model) {
-  return (model || '').replace(/^openai\//, '');
+  return parseModelIdentifier(model).bare;
+}
+
+function registerModelProviders(provider, models) {
+  if (provider !== 'openai' && provider !== 'anthropic') {
+    throw new Error(`Unsupported model provider: ${provider}`);
+  }
+  for (const model of models || []) {
+    const bare = stripPrefix(model?.id);
+    if (!bare) continue;
+    const providers = modelProviderRegistry.get(bare) || new Set();
+    providers.add(provider);
+    modelProviderRegistry.set(bare, providers);
+  }
+  return models;
+}
+
+function legacyProviderForModel(model) {
+  if (/^(gpt-|o\d+(?:-|$)|codex-)/.test(model)) return 'openai';
+  if (/^claude-/.test(model) || Object.prototype.hasOwnProperty.call(ANTHROPIC_MODEL_MAP, model)) return 'anthropic';
+  return null;
+}
+
+function modelRoutingError(model, ambiguous = false) {
+  const detail = ambiguous
+    ? `Model "${model}" is advertised by multiple providers.`
+    : `Cannot determine the provider for model "${model}".`;
+  const error = new Error(`${detail} Use "openai/${model}" or "anthropic/${model}".`);
+  error.code = ambiguous ? 'ambiguous_model_provider' : 'unknown_model_provider';
+  return error;
+}
+
+function routeRequest(model) {
+  const { bare, explicitProvider } = parseModelIdentifier(model);
+  if (explicitProvider) return explicitProvider;
+
+  const registered = modelProviderRegistry.get(bare);
+  if (registered?.size === 1) return registered.values().next().value;
+  if (registered?.size > 1) throw modelRoutingError(bare, true);
+
+  const legacyProvider = legacyProviderForModel(bare);
+  if (legacyProvider) return legacyProvider;
+  throw modelRoutingError(bare);
+}
+
+async function routeRequestWithDiscovery(model) {
+  try {
+    return routeRequest(model);
+  } catch (error) {
+    if (error.code !== 'unknown_model_provider') throw error;
+    // A client may call chat completions without listing models first. Refresh
+    // both catalogs once before rejecting a new unprefixed model, so live
+    // ownership is effective on the first request rather than only after GET
+    // /v1/models. Each fetch retains its normal cache/fallback behaviour.
+    await Promise.all([fetchAnthropicModels(), fetchOpenAIModels()]);
+    return routeRequest(model);
+  }
 }
 
 function resolveAnthropicModel(model) {
@@ -139,10 +202,23 @@ function loadModels() {
     if (existsSync(MODELS_FILE)) {
       const data = JSON.parse(readFileSync(MODELS_FILE, 'utf8'));
       console.log(`[MODELS] Loaded ${data.length} models from ${MODELS_FILE}`);
-      return {
-        anthropic: data.filter(m => routeRequest(m.id) === 'anthropic'),
-        openai:    data.filter(m => routeRequest(m.id) === 'openai'),
-      };
+      const grouped = { anthropic: [], openai: [] };
+      for (const model of data) {
+        const declared = String(model.owned_by || '').toLowerCase();
+        const explicit = parseModelIdentifier(model.id).explicitProvider;
+        if (declared && declared !== 'anthropic' && declared !== 'openai') {
+          throw new Error(`Model "${model.id}" has unsupported owned_by "${model.owned_by}"`);
+        }
+        if (explicit && declared && explicit !== declared) {
+          throw new Error(`Model "${model.id}" conflicts with owned_by "${model.owned_by}"`);
+        }
+        const provider = explicit || declared || legacyProviderForModel(stripPrefix(model.id));
+        if (!provider) {
+          throw new Error(`Model "${model.id}" must declare owned_by as "openai" or "anthropic", or use an explicit provider prefix`);
+        }
+        grouped[provider].push(model);
+      }
+      return grouped;
     }
   } catch (e) {
     console.error(`[MODELS] Error loading ${MODELS_FILE}: ${e.message}, using defaults`);
@@ -151,6 +227,8 @@ function loadModels() {
 }
 
 const { anthropic: ANTHROPIC_MODELS, openai: OPENAI_MODELS } = loadModels();
+registerModelProviders('anthropic', ANTHROPIC_MODELS);
+registerModelProviders('openai', OPENAI_MODELS);
 
 // ─── Live OpenAI model discovery ───
 // The ChatGPT backend exposes the exact catalog it will serve this account, gated
@@ -188,12 +266,13 @@ async function fetchOpenAIModels() {
     if (models.length === 0) throw new Error('empty catalog');
 
     openaiModelsCache = { fetchedAt: Date.now(), models };
+    registerModelProviders('openai', models);
     console.log(`[MODELS] OpenAI catalog refreshed (client_version=${CODEX_CLI_VERSION}): ${models.map(m => m.id).join(', ')}`);
     return models;
   } catch (e) {
     console.warn(`[MODELS] OpenAI catalog fetch failed (${e.message}), falling back to static list`);
     // Serve a stale cache over the static list — it was real at some point.
-    return openaiModelsCache.models || OPENAI_MODELS;
+    return registerModelProviders('openai', openaiModelsCache.models || OPENAI_MODELS);
   }
 }
 
@@ -231,11 +310,12 @@ async function fetchAnthropicModels() {
     if (models.length === 0) throw new Error('empty catalog');
 
     anthropicModelsCache = { fetchedAt: Date.now(), models };
+    registerModelProviders('anthropic', models);
     console.log(`[MODELS] Anthropic catalog refreshed: ${models.map(m => m.id).join(', ')}`);
     return models;
   } catch (e) {
     console.warn(`[MODELS] Anthropic catalog fetch failed (${e.message}), falling back to static list`);
-    return anthropicModelsCache.models || ANTHROPIC_MODELS;
+    return registerModelProviders('anthropic', anthropicModelsCache.models || ANTHROPIC_MODELS);
   }
 }
 
@@ -1593,12 +1673,20 @@ async function handleRequest(req, res) {
       if (!body.messages) return sendJSON(res, 400, { error: { message: 'messages required' } });
       if (!body.model) body.model = DEFAULT_MODEL;
 
-      const provider = routeRequest(body.model);
+      const provider = await routeRequestWithDiscovery(body.model);
       if (provider === 'openai') {
         return handleOpenAIChat(req, res, body);
       }
       return handleAnthropicChat(req, res, body);
     } catch (e) {
+      if (e.code === 'unknown_model_provider' || e.code === 'ambiguous_model_provider') {
+        return sendJSON(res, 400, { error: {
+          message: e.message,
+          type: 'invalid_request_error',
+          code: e.code,
+          param: 'model',
+        } });
+      }
       return sendJSON(res, 500, { error: { message: e.message } });
     }
   }
@@ -1875,7 +1963,7 @@ if (!isDirectRun) {
 ║  Tokens:                                                      ║
 ║${statusLines[0].padEnd(63)}║
 ║${statusLines[1].padEnd(63)}║
-║  Routing: gpt-*/o1*/o3*/o4*/codex-* → OpenAI, others → Anthropic     ║
+║  Routing: explicit prefix → live catalog → legacy rules          ║
 ╚═══════════════════════════════════════════════════════════════╝
 `);
   });
@@ -1910,4 +1998,13 @@ if (!isDirectRun) {
 }
 
 // ─── Exports (unit tests) ───
-export { convertToCodexRequest, buildUserContent, extractTextContent, routeRequest, convertMessages, buildAnthropicContent };
+export {
+  convertToCodexRequest,
+  buildUserContent,
+  extractTextContent,
+  routeRequest,
+  convertMessages,
+  buildAnthropicContent,
+  registerModelProviders,
+  stripPrefix,
+};

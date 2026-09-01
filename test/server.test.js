@@ -22,7 +22,15 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { convertToCodexRequest, buildUserContent, convertMessages, buildAnthropicContent } from '../server.js';
+import {
+  convertToCodexRequest,
+  buildUserContent,
+  convertMessages,
+  buildAnthropicContent,
+  registerModelProviders,
+  routeRequest,
+  stripPrefix,
+} from '../server.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(__dirname, '..', 'server.js');
@@ -141,6 +149,48 @@ describe('Health check', () => {
   });
 });
 
+describe('Provider-aware model routing', () => {
+  test('explicit provider prefixes take priority and are removed upstream', () => {
+    assert.equal(routeRequest('openai/future-reasoner'), 'openai');
+    assert.equal(stripPrefix('openai/future-reasoner'), 'future-reasoner');
+    assert.equal(routeRequest('anthropic/future-reasoner'), 'anthropic');
+    assert.equal(stripPrefix('anthropic/future-reasoner'), 'future-reasoner');
+  });
+
+  test('live catalog ownership routes names that do not match legacy patterns', () => {
+    registerModelProviders('openai', [{ id: 'nova-reasoner-test' }]);
+    registerModelProviders('anthropic', [{ id: 'aurora-assistant-test' }]);
+    assert.equal(routeRequest('nova-reasoner-test'), 'openai');
+    assert.equal(routeRequest('aurora-assistant-test'), 'anthropic');
+  });
+
+  test('legacy rules remain compatible and cover future o-series numbers', () => {
+    assert.equal(routeRequest('gpt-5.6'), 'openai');
+    assert.equal(routeRequest('o5-pro'), 'openai');
+    assert.equal(routeRequest('codex-next'), 'openai');
+    assert.equal(routeRequest('claude-sonnet-next'), 'anthropic');
+    assert.equal(routeRequest('sonnet'), 'anthropic');
+  });
+
+  test('ambiguous catalog ownership requires an explicit prefix', () => {
+    registerModelProviders('openai', [{ id: 'shared-model-test' }]);
+    registerModelProviders('anthropic', [{ id: 'shared-model-test' }]);
+    assert.throws(
+      () => routeRequest('shared-model-test'),
+      error => error.code === 'ambiguous_model_provider' && /explicit|openai\//i.test(error.message),
+    );
+    assert.equal(routeRequest('openai/shared-model-test'), 'openai');
+    assert.equal(routeRequest('anthropic/shared-model-test'), 'anthropic');
+  });
+
+  test('unknown unprefixed models fail closed instead of defaulting to Anthropic', () => {
+    assert.throws(
+      () => routeRequest('unclassified-model-test'),
+      error => error.code === 'unknown_model_provider' && /openai\//i.test(error.message),
+    );
+  });
+});
+
 describe('Authentication', () => {
   test('GET /v1/models — no key → 401', async () => {
     const { status } = await api('/v1/models');
@@ -236,6 +286,28 @@ describe('Chat completions — request validation', () => {
       authed(post({ model: 'o3-pro', messages: [{ role: 'user', content: 'hi' }] })));
     assert.equal(status, 503);
     assert.match(body.error.message, /openai/i);
+  });
+
+  test('explicit prefixes route future model names without catalog knowledge', async () => {
+    const openai = await api('/v1/chat/completions',
+      authed(post({ model: 'openai/future-api-model-test', messages: [{ role: 'user', content: 'hi' }] })));
+    assert.equal(openai.status, 503);
+    assert.match(openai.body.error.message, /openai/i);
+
+    const anthropic = await api('/v1/chat/completions',
+      authed(post({ model: 'anthropic/future-api-model-test', messages: [{ role: 'user', content: 'hi' }] })));
+    assert.equal(anthropic.status, 503);
+    assert.match(anthropic.body.error.message, /anthropic/i);
+  });
+
+  test('unknown unprefixed model → 400 with actionable provider guidance', async () => {
+    const { status, body } = await api('/v1/chat/completions',
+      authed(post({ model: 'unknown-api-model-test', messages: [{ role: 'user', content: 'hi' }] })));
+    assert.equal(status, 400);
+    assert.equal(body.error.code, 'unknown_model_provider');
+    assert.equal(body.error.param, 'model');
+    assert.match(body.error.message, /openai\//i);
+    assert.match(body.error.message, /anthropic\//i);
   });
 });
 
