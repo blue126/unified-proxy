@@ -35,7 +35,7 @@ const ANTHROPIC_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
 // Claude Code impersonation — the Anthropic counterpart of CODEX_CLI_VERSION.
-const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || '2.1.2';
+const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || '2.1.260';
 
 // ─── OpenAI OAuth (cross-verified: openai/codex, open-hax/codex, codex-proxy) ───
 const OPENAI_PLATFORM_API_URL = 'https://api.openai.com/v1/chat/completions';  // 保留，未来 API credits 可用
