@@ -35,7 +35,7 @@ const ANTHROPIC_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const ANTHROPIC_OAUTH_BETA = 'oauth-2025-04-20';
 // Claude Code impersonation — the Anthropic counterpart of CODEX_CLI_VERSION.
-const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || '2.1.2';
+const CLAUDE_CLI_VERSION = process.env.CLAUDE_CLI_VERSION || '2.1.260';
 
 // ─── OpenAI OAuth (cross-verified: openai/codex, open-hax/codex, codex-proxy) ───
 const OPENAI_PLATFORM_API_URL = 'https://api.openai.com/v1/chat/completions';  // 保留，未来 API credits 可用
@@ -1291,6 +1291,8 @@ class CodexSSETransformer {
     this.nextToolIndex = 0;
     this.sawToolCalls = false;
     this.usage = null;
+    this.terminalReceived = false;
+    this.textByItemID = new Map();
   }
 
   /** Build a role-only chunk (emitted once at start of response). */
@@ -1301,6 +1303,75 @@ class CodexSSETransformer {
       id: this.responseID, object: 'chat.completion.chunk', created, model: this.model,
       choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
     };
+  }
+
+  _contentChunk(content, created) {
+    return {
+      id: this.responseID, object: 'chat.completion.chunk', created, model: this.model,
+      choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    };
+  }
+
+  _itemKey(event, item = event.item) {
+    return item?.id || event.item_id || `output-${event.output_index ?? 0}`;
+  }
+
+  _recoverMessageText(event, created) {
+    const item = event.item;
+    if (!item || item.type !== 'message') return [];
+
+    const fullText = (item.content || [])
+      .filter(part => part?.type === 'output_text' && typeof part.text === 'string')
+      .map(part => part.text)
+      .join('');
+    if (!fullText) return [];
+
+    const key = this._itemKey(event, item);
+    const emitted = this.textByItemID.get(key) || '';
+    if (fullText === emitted) return [];
+
+    // The completed item is authoritative and can contain text whose delta was omitted.
+    const missingText = fullText.startsWith(emitted) ? fullText.slice(emitted.length) : fullText;
+    this.textByItemID.set(key, fullText);
+    const chunks = [];
+    const rc = this._roleChunk(created);
+    if (rc) chunks.push(rc);
+    chunks.push(this._contentChunk(missingText, created));
+    return chunks;
+  }
+
+  _completionChunks(event, created, forcedFinishReason) {
+    const chunks = [];
+    for (const item of event.response?.output || []) {
+      chunks.push(...this._recoverMessageText({ ...event, item }, created));
+    }
+
+    const resp = event.response;
+    const incomplete = resp?.status === 'incomplete'
+      || resp?.incomplete_details?.reason === 'max_output_tokens';
+    const finish_reason = forcedFinishReason
+      || (incomplete ? 'length' : (this.sawToolCalls ? 'tool_calls' : 'stop'));
+
+    const respUsage = resp?.usage;
+    if (respUsage) {
+      const prompt_tokens = respUsage.input_tokens ?? respUsage.prompt_tokens ?? 0;
+      const completion_tokens = respUsage.output_tokens ?? respUsage.completion_tokens ?? 0;
+      this.usage = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens };
+      if (respUsage.prompt_tokens_details) this.usage.prompt_tokens_details = respUsage.prompt_tokens_details;
+      if (respUsage.completion_tokens_details) this.usage.completion_tokens_details = respUsage.completion_tokens_details;
+      if (respUsage.input_tokens_details) this.usage.prompt_tokens_details = { cached_tokens: respUsage.input_tokens_details.cached_tokens ?? 0 };
+      if (respUsage.output_tokens_details) this.usage.completion_tokens_details = { reasoning_tokens: respUsage.output_tokens_details.reasoning_tokens ?? 0 };
+    } else {
+      this.usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+    }
+
+    this.terminalReceived = true;
+    chunks.push({
+      id: this.responseID, object: 'chat.completion.chunk', created, model: this.model,
+      choices: [{ index: 0, delta: {}, finish_reason }],
+      usage: this.usage,
+    });
+    return chunks;
   }
 
   /**
@@ -1325,10 +1396,15 @@ class CodexSSETransformer {
       case 'response.output_text.delta': {
         const rc = this._roleChunk(created);
         if (rc) chunks.push(rc);
-        chunks.push({
-          id: this.responseID, object: 'chat.completion.chunk', created, model: this.model,
-          choices: [{ index: 0, delta: { content: event.delta || '' }, finish_reason: null }],
-        });
+        const delta = event.delta || '';
+        const key = this._itemKey(event);
+        this.textByItemID.set(key, (this.textByItemID.get(key) || '') + delta);
+        chunks.push(this._contentChunk(delta, created));
+        break;
+      }
+
+      case 'response.output_item.done': {
+        chunks.push(...this._recoverMessageText(event, created));
         break;
       }
 
@@ -1372,39 +1448,19 @@ class CodexSSETransformer {
       }
 
       case 'response.completed': {
-        // Determine finish_reason
-        let finish_reason = 'stop';
-        if (this.sawToolCalls) {
-          finish_reason = 'tool_calls';
-        } else {
-          const resp = event.response;
-          if (resp?.status === 'incomplete' || resp?.incomplete_details?.reason === 'max_output_tokens') {
-            finish_reason = 'length';
-          }
-        }
-
-        // Extract usage — preserve prompt_tokens_details/completion_tokens_details for caching visibility
-        const respUsage = event.response?.usage;
-        if (respUsage) {
-          const prompt_tokens = respUsage.input_tokens ?? respUsage.prompt_tokens ?? 0;
-          const completion_tokens = respUsage.output_tokens ?? respUsage.completion_tokens ?? 0;
-          this.usage = { prompt_tokens, completion_tokens, total_tokens: prompt_tokens + completion_tokens };
-          if (respUsage.prompt_tokens_details) this.usage.prompt_tokens_details = respUsage.prompt_tokens_details;
-          if (respUsage.completion_tokens_details) this.usage.completion_tokens_details = respUsage.completion_tokens_details;
-          // Also check Responses API field names (input_tokens_details / output_tokens_details)
-          if (respUsage.input_tokens_details) this.usage.prompt_tokens_details = { cached_tokens: respUsage.input_tokens_details.cached_tokens ?? 0 };
-          if (respUsage.output_tokens_details) this.usage.completion_tokens_details = { reasoning_tokens: respUsage.output_tokens_details.reasoning_tokens ?? 0 };
-        } else {
-          this.usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-        }
-
-        const finalChunk = {
-          id: this.responseID, object: 'chat.completion.chunk', created, model: this.model,
-          choices: [{ index: 0, delta: {}, finish_reason }],
-          usage: this.usage,
-        };
-        chunks.push(finalChunk);
+        chunks.push(...this._completionChunks(event, created));
         break;
+      }
+
+      case 'response.incomplete': {
+        chunks.push(...this._completionChunks(event, created, 'length'));
+        break;
+      }
+
+      case 'response.failed':
+      case 'error': {
+        const error = event.response?.error || event.error;
+        throw new Error(error?.message || error?.code || `OpenAI upstream ${type}`);
       }
 
       // Ignore all other event types
@@ -1414,6 +1470,18 @@ class CodexSSETransformer {
 
     return chunks;
   }
+}
+
+function extractSSEPayloads(buffer, flush = false) {
+  const lines = buffer.split(/\r?\n/);
+  const remainder = flush ? '' : (lines.pop() || '');
+  const payloads = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith(':') || !trimmed.startsWith('data:')) continue;
+    payloads.push(trimmed.slice(5).trim());
+  }
+  return { payloads, remainder };
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1533,16 +1601,15 @@ async function handleOpenAIChat(req, res, body) {
       try {
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop() || '';
+          if (done) {
+            sseBuffer += decoder.decode();
+          } else {
+            sseBuffer += decoder.decode(value, { stream: true });
+          }
+          const parsed = extractSSEPayloads(sseBuffer, done);
+          sseBuffer = parsed.remainder;
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith(':')) continue;
-            if (!trimmed.startsWith('data:')) continue;
-            const payload = trimmed.slice(5).trim();
+          for (const payload of parsed.payloads) {
             if (payload === '[DONE]') continue;
 
             try {
@@ -1551,9 +1618,13 @@ async function handleOpenAIChat(req, res, body) {
               for (const chunk of chunks) {
                 res.write(`data: ${JSON.stringify(chunk)}\n\n`);
               }
-            } catch {}
+            } catch (e) {
+              throw new Error(`Invalid OpenAI SSE event: ${e.message}`);
+            }
           }
+          if (done) break;
         }
+        if (!transformer.terminalReceived) throw new Error('OpenAI upstream ended before a terminal event');
         res.write('data: [DONE]\n\n');
         res.end();
       } catch (e) {
@@ -1574,15 +1645,15 @@ async function handleOpenAIChat(req, res, body) {
 
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-          sseBuffer += decoder.decode(value, { stream: true });
-          const lines = sseBuffer.split('\n');
-          sseBuffer = lines.pop() || '';
+          if (done) {
+            sseBuffer += decoder.decode();
+          } else {
+            sseBuffer += decoder.decode(value, { stream: true });
+          }
+          const parsed = extractSSEPayloads(sseBuffer, done);
+          sseBuffer = parsed.remainder;
 
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith(':') || !trimmed.startsWith('data:')) continue;
-            const payload = trimmed.slice(5).trim();
+          for (const payload of parsed.payloads) {
             if (payload === '[DONE]') continue;
 
             try {
@@ -1608,9 +1679,13 @@ async function handleOpenAIChat(req, res, body) {
                 if (choice.finish_reason) finishReason = choice.finish_reason;
                 if (chunk.usage) usage = chunk.usage;
               }
-            } catch {}
+            } catch (e) {
+              throw new Error(`Invalid OpenAI SSE event: ${e.message}`);
+            }
           }
+          if (done) break;
         }
+        if (!transformer.terminalReceived) throw new Error('OpenAI upstream ended before a terminal event');
 
         const message = { role: 'assistant', content: contentParts.join('') || null };
         if (toolCallsMap.size > 0) {
@@ -2147,6 +2222,8 @@ export {
   routeRequest,
   convertMessages,
   buildAnthropicContent,
+  CodexSSETransformer,
+  extractSSEPayloads,
   classifyRefreshFailure,
   createRefreshState,
   recordRefreshFailure,
