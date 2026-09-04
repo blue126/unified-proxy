@@ -27,6 +27,8 @@ import {
   buildUserContent,
   convertMessages,
   buildAnthropicContent,
+  CodexSSETransformer,
+  extractSSEPayloads,
   classifyRefreshFailure,
   createRefreshState,
   recordRefreshFailure,
@@ -577,6 +579,75 @@ describe('buildUserContent', () => {
   test('null/undefined content yields no blocks', () => {
     assert.deepEqual(buildUserContent(null), []);
     assert.deepEqual(buildUserContent(undefined), []);
+  });
+});
+
+describe('CodexSSETransformer', () => {
+  test('recovers a later final-answer item that was only present in output_item.done', () => {
+    const transformer = new CodexSSETransformer('gpt-5.4-mini');
+    const content = [];
+    const collect = event => {
+      for (const chunk of transformer.transform(event)) {
+        if (chunk.choices?.[0]?.delta?.content) content.push(chunk.choices[0].delta.content);
+      }
+    };
+
+    collect({ type: 'response.output_text.delta', item_id: 'msg_1', delta: 'I will inspect it.' });
+    collect({
+      type: 'response.output_item.done',
+      item: { id: 'msg_1', type: 'message', phase: 'commentary', content: [{ type: 'output_text', text: 'I will inspect it.' }] },
+    });
+    collect({
+      type: 'response.output_item.done',
+      item: { id: 'msg_2', type: 'message', phase: 'final_answer', content: [{ type: 'output_text', text: 'The final answer.' }] },
+    });
+    collect({ type: 'response.completed', response: { status: 'completed' } });
+
+    assert.equal(content.join(''), 'I will inspect it.The final answer.');
+    assert.equal(transformer.terminalReceived, true);
+  });
+
+  test('recovers message text from the completed response snapshot', () => {
+    const transformer = new CodexSSETransformer('gpt-5.4-mini');
+    const chunks = transformer.transform({
+      type: 'response.completed',
+      response: {
+        status: 'completed',
+        output: [{ id: 'msg_1', type: 'message', content: [{ type: 'output_text', text: 'complete text' }] }],
+      },
+    });
+    assert.equal(chunks.find(chunk => chunk.choices?.[0]?.delta?.content)?.choices[0].delta.content, 'complete text');
+    assert.equal(chunks.at(-1).choices[0].finish_reason, 'stop');
+  });
+
+  test('maps an incomplete response to length even after a tool call', () => {
+    const transformer = new CodexSSETransformer('gpt-5.4-mini');
+    transformer.transform({ type: 'response.output_item.added', item: { id: 'fc_1', type: 'function_call', name: 'read' } });
+    const chunks = transformer.transform({
+      type: 'response.incomplete',
+      response: { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } },
+    });
+    assert.equal(chunks.at(-1).choices[0].finish_reason, 'length');
+  });
+
+  test('surfaces failed upstream responses', () => {
+    const transformer = new CodexSSETransformer('gpt-5.4-mini');
+    assert.throws(() => transformer.transform({
+      type: 'response.failed',
+      response: { error: { message: 'generation failed' } },
+    }), /generation failed/);
+  });
+});
+
+describe('extractSSEPayloads', () => {
+  test('keeps partial lines and flushes a final event without a newline', () => {
+    const partial = extractSSEPayloads('data: {"type":"response.created"}\ndata: {"type"');
+    assert.deepEqual(partial.payloads, ['{"type":"response.created"}']);
+    assert.equal(partial.remainder, 'data: {"type"');
+
+    const flushed = extractSSEPayloads(partial.remainder + ':"response.completed"}', true);
+    assert.deepEqual(flushed.payloads, ['{"type":"response.completed"}']);
+    assert.equal(flushed.remainder, '');
   });
 });
 
