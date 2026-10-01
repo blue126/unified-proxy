@@ -14,36 +14,13 @@
 
 ## Environment Variables and Connection Info
 
-This is a public repository: never commit secret values, the real deployment domain, or host.
+This is a public repository: never commit secret values, the real domain, or host.
 
-**Where values live**
-
-| Location | Holds |
-|---|---|
-| `.env.secrets` (gitignored, not committed) | `PROXY_DOMAIN`, `PROXY_API_KEY`, `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY_FILE` |
-| `.env.secrets.example` | The same keys as a committed template |
-| `/opt/unified-proxy/.env` on the server | Runtime config the proxy reads (`PROXY_API_KEY`, `PORT`, `HOST`, `PROXY_AUTH_FILE`) |
-| GitHub Actions secrets | The same five `.env.secrets` keys, pushed by `./scripts/push-secrets.sh` |
-
-`PROXY_API_KEY` must match on the server and in `.env.secrets`. Use
-`./scripts/rotate-proxy-key.sh`, which updates both plus the GitHub secret.
-
-**Connecting a client** — OpenAI-compatible:
-
-- Base URL: `https://$PROXY_DOMAIN/v1`
-- API key: the `PROXY_API_KEY` value
-
-Per-client examples are in `README.md` → "Using with AI Clients".
-
-**Server runtime variables** (defaults in parentheses; full table in `README.md` →
-"Configuration"): `PROXY_API_KEY` (none — **auth is disabled when unset**), `PORT`
-(3456), `HOST` (127.0.0.1), `PROXY_AUTH_FILE` (`~/.unified-proxy/auth.json`),
-`CLAUDE_ACCESS_TOKEN` / `OPENAI_ACCESS_TOKEN` (fallback upstream tokens),
-`OPENAI_ACCOUNT_ID`, `LOG_ALL_REQUESTS`, `ALERT_WEBHOOK_URL`, `CODEX_CLI_VERSION`.
-
-Auth compares `PROXY_API_KEY` against `Authorization: Bearer <key>`, skipped for
-`/health` and `/`. `./scripts/smoke.sh` reads `BASE_URL` and `PROXY_API_KEY` from
-`.env.secrets`, so `npm run smoke` needs no extra env.
+- Values live in `.env.secrets` (gitignored; template `.env.secrets.example`) and on the
+  server at `/opt/unified-proxy/.env`; GitHub secrets mirror them (`./scripts/push-secrets.sh`).
+- `PROXY_API_KEY` must match across all three — rotate with `./scripts/rotate-proxy-key.sh`.
+- Clients connect with base URL `https://$PROXY_DOMAIN/v1` and that same key.
+- Variable semantics and client setup are documented once in `README.md`; do not duplicate here.
 
 ## Validation
 
