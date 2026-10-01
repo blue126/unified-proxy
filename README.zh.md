@@ -452,7 +452,7 @@ opencode
 
 ## 认证登录（OAuth）
 
-OAuth Token 只需在**有浏览器的机器**上登录一次。Token 会自动续期，仅在 refresh token 过期（约每 30 天）后需要重新登录。
+OAuth 授权需要在浏览器中完成，但浏览器可以在你的电脑上，服务器无需桌面环境。Token 会自动续期；refresh token 失效或被吊销时需要重新登录。
 
 ### Anthropic（Claude Max）
 
@@ -488,7 +488,7 @@ Token 存储在 `~/.unified-proxy/auth.json`（或 `$PROXY_AUTH_FILE`），文�
 
 ### 首次部署：将 auth.json 传到服务器
 
-OCI VM 是无头服务器，无法直接运行 `--login`。需要在本地 Mac 完成授权，再将 token 文件复制到服务器：
+首次初始化两个 provider 时，可以在本地 Mac 完成授权，再将 token 文件复制到服务器。已部署服务器的 Claude 重新认证可直接使用下方的 Actions 无桌面流程，无需上传整个 `auth.json`。
 
 > [!WARNING]
 > 不要同时在本地和 OCI 服务器上运行代理并共用同一份 `auth.json`。两个 provider 均使用单次有效的滚动 refresh token——先刷新的一方会使另一方的 token 失效，导致 `invalid_grant` 错误。**登录完成后请立即关闭本地服务器，再上传文件。**
@@ -520,7 +520,7 @@ ssh ubuntu@<oci-ip> "sudo systemctl restart unified-proxy"
 - 服务器**连续离线超过 30 天**（refresh token 未滚动更新而过期），或
 - Token 被**主动吊销**（例如在 claude.ai 或 ChatGPT 网页端退出了所有设备的登录）。
 
-出现上述情况时，重复首次部署的步骤：
+仅 Claude 失效时，请使用下方的无桌面认证流程，保留服务器上仍有效的 OpenAI 凭证。需要重新初始化两个 provider 时，才重复首次部署步骤：
 
 ```bash
 # 在本地 Mac 重新登录
@@ -529,6 +529,35 @@ node server.js --login all
 # 上传新 token
 scp ~/.unified-proxy/auth.json ubuntu@<oci-ip>:/opt/unified-proxy/auth.json
 ssh ubuntu@<oci-ip> "chmod 600 /opt/unified-proxy/auth.json && sudo systemctl restart unified-proxy"
+```
+
+### Claude 无桌面认证（GitHub Actions）
+
+`.github/workflows/server-maintenance.yml` 复用已有的 `OCI_HOST`、`OCI_USER`、`OCI_SSH_KEY`、`PROXY_DOMAIN` 和 `PROXY_API_KEY`。工作流合并到 `main` 后，在 **Actions → Server maintenance → Run workflow** 选择 `main`，按以下步骤操作：
+
+1. 选择 `diagnose`，读取服务状态和 `/health`，确认 Anthropic 是否为 `reauth_required`。
+2. 选择 `claude-login-start`。在该次运行的 **Run maintenance via SSH** 日志中复制授权链接，用你自己电脑上的浏览器打开并登录 Claude。
+3. 在 15 分钟内再次运行工作流，选择 `claude-login-complete`，将浏览器返回的完整 `code#state` 填入 `authorization_code`。
+
+服务器不启动浏览器、不监听 OAuth 回调端口，也不等待交互式终端输入。PKCE verifier 仅保存在服务器 `/opt/unified-proxy/.maintenance/claude-login.json`（权限 `0600`），不会进入 Actions 日志或 artifact。重新运行 start 会替换待完成的会话；旧授权码不能用于新会话。
+
+complete 会短暂停止 `unified-proxy`，避免与后台续期同时写文件；只替换 `/opt/unified-proxy/auth.json` 的 `anthropic` 部分并保留 OpenAI 和其他字段，原子写入后恢复服务。交换失败也会尝试恢复原服务，不会覆盖旧凭证。随后单独验证 Claude 的真实推理，Claude 失败会让本次工作流失败，不会被 OpenAI 的正常状态掩盖。
+
+`authorization_code` 是一次性授权码，不是 access/refresh token；工作流会屏蔽日志中的授权码，但 GitHub 的手动触发输入本身并非 Secret 存储。不要把 token 或私钥填入该字段。可选的 `OCI_SSH_FINGERPRINT` Secret（`SHA256:...`）用于固定 SSH 主机公钥；未设置时，通过 `ssh-keyscan` 获取主机公钥。
+
+如已有服务器终端访问，也可直接运行两步 CLI。第二步前停止服务，完成或失败后恢复服务：
+
+```bash
+PROXY_AUTH_FILE=/opt/unified-proxy/auth.json node scripts/claude-headless-auth.js start
+# 在自己的浏览器完成授权；授权码通过环境变量 CLAUDE_AUTH_CODE 传入 complete。
+read -rsp 'Claude code#state: ' CLAUDE_AUTH_CODE; echo
+export CLAUDE_AUTH_CODE
+(
+  trap 'sudo systemctl start unified-proxy' EXIT
+  sudo systemctl stop unified-proxy
+  PROXY_AUTH_FILE=/opt/unified-proxy/auth.json node scripts/claude-headless-auth.js complete
+)
+unset CLAUDE_AUTH_CODE
 ```
 
 ### 服务管理

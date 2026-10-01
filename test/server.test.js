@@ -41,6 +41,7 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(__dirname, '..', 'server.js');
+const MOCK_UPSTREAM = join(__dirname, 'mock-upstream.js');
 const PORT = 13456;
 const KEY = 'test-key-unified-proxy';
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -76,7 +77,7 @@ function post(data, extra = {}) {
 }
 
 async function startServer(extraEnv = {}) {
-  const p = spawn(process.execPath, [SERVER], {
+  const p = spawn(process.execPath, ['--import', MOCK_UPSTREAM, SERVER], {
     env: {
       ...process.env,
       PORT: String(PORT),
@@ -425,16 +426,13 @@ describe('OpenAI env var fallback', () => {
     });
     const { status, body } = await api('/v1/chat/completions',
       authed(post({ model: 'gpt-5.2', messages: [{ role: 'user', content: 'hi' }] })));
-    assert.notEqual(status, 401, 'should not fail proxy auth');
-    assert.notEqual(status, 400, 'should not fail validation');
+    assert.equal(status, 503, 'mock upstream 401 requires re-authentication');
     // Token was loaded and accountId passed — request reached upstream.
     // With a fake token, upstream returns 401 and no refresh token exists, so
     // the provider enters the explicit re-authentication-required state.
     // This is distinct from "no token" 503 (getOAuthTokens throws) or "missing accountId" 503.
-    if (status === 503) {
-      assert.match(body.error.message, /require re-authentication/i,
-        'expected upstream auth failure, not a "no token" or "missing accountId" error');
-    }
+    assert.match(body.error.message, /require re-authentication/i,
+      'expected upstream auth failure, not a "no token" or "missing accountId" error');
   });
 });
 
