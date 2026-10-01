@@ -3,6 +3,9 @@ name: Deploy to OCI VM
 on:
   push:
     branches: [main]
+    # Docs-only merges cannot change what the VM runs, so skip the restart.
+    paths-ignore:
+      - '**/*.md'
 
 # Credential maintenance briefly stops the same service; serialize both writers.
 concurrency:
