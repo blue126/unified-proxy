@@ -5,7 +5,8 @@
 - Start every task from the latest remote default branch in a unique branch and worktree. Do not switch or modify the user's existing checkout.
 - Before editing, inspect the current branch, dirty state, upstream, and existing worktrees. Preserve all user changes; do not stash, reset, clean, overwrite, or commit them.
 - Complete work in this order: validate, commit, push the task branch, then open a Draft PR.
-- Agents must never merge or close PRs, force-push, rewrite history, or delete branches or worktrees.
+- Agents may merge a PR only when the user explicitly authorizes that merge in the current session and validation for the current PR head has passed. Marking an authorized Draft PR ready for merge is allowed. Without explicit merge authorization, leave the PR as a Draft.
+- Agents must never close PRs without merging, force-push, rewrite history, or delete branches or worktrees.
 - Do not deploy, publish, release, push images, change production configuration, or access production secrets unless the user explicitly requests that separate action.
 
 ## Validation
