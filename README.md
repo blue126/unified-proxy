@@ -539,6 +539,8 @@ ssh ubuntu@<oci-ip> "chmod 600 /opt/unified-proxy/auth.json && sudo systemctl re
 
 ### Headless Claude authentication (GitHub Actions)
 
+For the same flow from an iPhone, see [the native Apple Shortcut setup](docs/claude-iphone-shortcut.md).
+
 `.github/workflows/server-maintenance.yml` reuses the existing `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY`, `PROXY_DOMAIN`, and `PROXY_API_KEY` secrets. After merging the workflow into `main`, open **Actions → Server maintenance → Run workflow**, select `main`, and:
 
 1. Select `diagnose` to read service status and `/health`, including Anthropic's `reauth_required` state.
