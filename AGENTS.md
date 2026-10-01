@@ -14,54 +14,36 @@
 
 ## Environment Variables and Connection Info
 
-This is a public repository. Never commit secret values, and never commit the real
-deployment domain or host — use placeholders in tracked files.
+This is a public repository: never commit secret values, the real deployment domain, or host.
 
 **Where values live**
 
-| Location | Holds | Notes |
-|---|---|---|
-| `.env.secrets` (repo root) | Local/deploy credentials: `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY_FILE`, `PROXY_DOMAIN`, `PROXY_API_KEY` | Gitignored. This is the local source of truth. |
-| `.env.secrets.example` | Same keys, no values | Committed template. Copy to `.env.secrets` and fill in. |
-| `/opt/unified-proxy/.env` on the server | Runtime config the proxy actually reads: `PROXY_API_KEY`, `PORT`, `HOST`, `PROXY_AUTH_FILE`, and the rest | Not in this repo. Server-side source of truth. |
-| GitHub Actions secrets | `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY_FILE`, `PROXY_DOMAIN`, `PROXY_API_KEY` | Synced from `.env.secrets` by `./scripts/push-secrets.sh`. |
+| Location | Holds |
+|---|---|
+| `.env.secrets` (gitignored, not committed) | `PROXY_DOMAIN`, `PROXY_API_KEY`, `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY_FILE` |
+| `.env.secrets.example` | The same keys as a committed template |
+| `/opt/unified-proxy/.env` on the server | Runtime config the proxy reads (`PROXY_API_KEY`, `PORT`, `HOST`, `PROXY_AUTH_FILE`) |
+| GitHub Actions secrets | The same five `.env.secrets` keys, pushed by `./scripts/push-secrets.sh` |
 
-`PROXY_API_KEY` must match in `.env.secrets`, `/opt/unified-proxy/.env`, and the GitHub
-secret. `./scripts/rotate-proxy-key.sh` rotates all three together — use it instead of
-editing one by hand.
+`PROXY_API_KEY` must match on the server and in `.env.secrets`. Use
+`./scripts/rotate-proxy-key.sh`, which updates both plus the GitHub secret.
 
-**Client connection info**
+**Connecting a client** — OpenAI-compatible:
 
-- Base URL: `https://$PROXY_DOMAIN/v1` (OpenAI-compatible)
+- Base URL: `https://$PROXY_DOMAIN/v1`
 - API key: the `PROXY_API_KEY` value
 
-Client config examples (Python `openai` SDK, Cursor/VS Code, Opencode) are in
-`README.md` → "Using with AI Clients". The concrete domain is only in `.env.secrets`.
+Per-client examples are in `README.md` → "Using with AI Clients".
 
-**Variables that matter**
+**Server runtime variables** (defaults in parentheses; full table in `README.md` →
+"Configuration"): `PROXY_API_KEY` (none — **auth is disabled when unset**), `PORT`
+(3456), `HOST` (127.0.0.1), `PROXY_AUTH_FILE` (`~/.unified-proxy/auth.json`),
+`CLAUDE_ACCESS_TOKEN` / `OPENAI_ACCESS_TOKEN` (fallback upstream tokens),
+`OPENAI_ACCOUNT_ID`, `LOG_ALL_REQUESTS`, `ALERT_WEBHOOK_URL`, `CODEX_CLI_VERSION`.
 
-Server runtime (`server.js`), full table in `README.md` → "Configuration":
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `PROXY_API_KEY` | _(none)_ | Auth for all non-health endpoints. **If unset, auth is disabled.** |
-| `PORT` | `3456` | Listen port. |
-| `HOST` | `127.0.0.1` | Listen address. |
-| `PROXY_AUTH_FILE` | `~/.unified-proxy/auth.json` | OAuth token storage. |
-| `CLAUDE_ACCESS_TOKEN` / `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback upstream tokens when `auth.json` has none. |
-| `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID; optional. |
-| `LOG_ALL_REQUESTS` | _(unset)_ | `1` logs every request, not just failures. |
-| `ALERT_WEBHOOK_URL` | _(none)_ | POSTs token-refresh failure/recovery alerts. |
-| `CODEX_CLI_VERSION` | `0.150.0` | Version reported to the ChatGPT backend; gates served models. |
-
-Local test overrides: `BASE_URL` and `PROXY_API_KEY`. `./scripts/smoke.sh` reads both
-from `.env.secrets` automatically, so `npm run smoke` needs no extra env.
-
-**Auth behavior**
-
-`PROXY_API_KEY` is compared against the `Authorization: Bearer <key>` header. Auth is
-skipped for `/health` and `/`, and is entirely disabled when `PROXY_API_KEY` is unset
-(which is why local development needs no key).
+Auth compares `PROXY_API_KEY` against `Authorization: Bearer <key>`, skipped for
+`/health` and `/`. `./scripts/smoke.sh` reads `BASE_URL` and `PROXY_API_KEY` from
+`.env.secrets`, so `npm run smoke` needs no extra env.
 
 ## Validation
 
