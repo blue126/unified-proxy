@@ -458,7 +458,7 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 
 ## Authentication Setup (OAuth Login)
 
-OAuth tokens must be obtained on a **machine with a browser**. Tokens auto-refresh — you only need to re-login if the refresh token expires (roughly every 30 days).
+OAuth consent requires a browser, which can run on your own computer while the server stays headless. Tokens auto-refresh; re-login is needed when a refresh token expires or is revoked.
 
 ### Anthropic (Claude Max)
 
@@ -494,7 +494,7 @@ The proxy runs as a systemd service behind Caddy for TLS termination.
 
 ### First-time setup: upload auth.json to the server
 
-The OCI VM is a headless server — `--login` cannot open a browser there. Log in on your local Mac first, then copy the token file to the server:
+For the initial setup of both providers, log in on your local Mac and copy the token file to the server. To re-authenticate Claude on an existing server, use the headless Actions flow below instead of uploading the entire `auth.json`.
 
 > [!WARNING]
 > Do not run the local server and the OCI server simultaneously with the same `auth.json`. Both providers use single-use rolling refresh tokens — whichever instance refreshes first invalidates the other's token, causing `invalid_grant` errors. **Stop the local server immediately after `--login` and before uploading.**
@@ -526,7 +526,7 @@ Manual re-login is only needed if:
 - The server was **offline for 30+ consecutive days** (refresh token expired without being rotated), or
 - The token was **explicitly revoked** (e.g. you signed out of claude.ai or ChatGPT on all devices).
 
-When that happens, repeat the first-time setup:
+If only Claude fails, use the headless flow below to preserve the server's healthy OpenAI credentials. Repeat first-time setup only when reinitializing both providers:
 
 ```bash
 # Re-login on your local Mac
@@ -535,6 +535,35 @@ node server.js --login all
 # Upload and restart
 scp ~/.unified-proxy/auth.json ubuntu@<oci-ip>:/opt/unified-proxy/auth.json
 ssh ubuntu@<oci-ip> "chmod 600 /opt/unified-proxy/auth.json && sudo systemctl restart unified-proxy"
+```
+
+### Headless Claude authentication (GitHub Actions)
+
+`.github/workflows/server-maintenance.yml` reuses the existing `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY`, `PROXY_DOMAIN`, and `PROXY_API_KEY` secrets. After merging the workflow into `main`, open **Actions → Server maintenance → Run workflow**, select `main`, and:
+
+1. Select `diagnose` to read service status and `/health`, including Anthropic's `reauth_required` state.
+2. Select `claude-login-start`. Copy the authorization URL from **Run maintenance via SSH** logs, open it in your own browser, and sign in to Claude.
+3. Within 15 minutes, run the workflow again with `claude-login-complete` and paste the browser's full `code#state` into `authorization_code`.
+
+The server opens no browser or callback port and waits for no interactive terminal input. The PKCE verifier stays in `/opt/unified-proxy/.maintenance/claude-login.json` on the server (mode `0600`), never in Actions logs or artifacts. Starting again replaces the pending session and invalidates the previous session's code.
+
+Completion briefly stops `unified-proxy` to exclude the background credential writer, atomically updates only the `anthropic` section of `/opt/unified-proxy/auth.json`, preserves OpenAI and other fields, and starts the service again. Failed exchanges also attempt to restore the service without overwriting existing credentials. A separate live Claude inference check fails this workflow if Claude remains unavailable, even when OpenAI works.
+
+The `authorization_code` input is a one-time code, not an access or refresh token. The workflow masks the code in logs, but GitHub dispatch inputs are not Secret storage; do not enter tokens or private keys there. An optional `OCI_SSH_FINGERPRINT` secret (`SHA256:...`) pins the SSH host public key; without it, host keys are obtained with `ssh-keyscan`.
+
+With a server terminal, the same two-step CLI can be used directly. Stop the service before completion and restore it after success or failure:
+
+```bash
+PROXY_AUTH_FILE=/opt/unified-proxy/auth.json node scripts/claude-headless-auth.js start
+# Authorize in your own browser; supply the code through CLAUDE_AUTH_CODE for complete.
+read -rsp 'Claude code#state: ' CLAUDE_AUTH_CODE; echo
+export CLAUDE_AUTH_CODE
+(
+  trap 'sudo systemctl start unified-proxy' EXIT
+  sudo systemctl stop unified-proxy
+  PROXY_AUTH_FILE=/opt/unified-proxy/auth.json node scripts/claude-headless-auth.js complete
+)
+unset CLAUDE_AUTH_CODE
 ```
 
 ### Service management

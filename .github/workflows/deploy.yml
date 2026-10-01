@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
 
+# Credential maintenance briefly stops the same service; serialize both writers.
+concurrency:
+  group: unified-proxy-production
+  cancel-in-progress: false
+
 jobs:
   deploy:
     name: Deploy
