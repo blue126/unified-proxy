@@ -16,10 +16,12 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=root / ".env.litellm")
     args = parser.parse_args()
 
+    db_password = secrets.token_hex(24)
     content = (
         f"LITELLM_MASTER_KEY=sk-{secrets.token_hex(32)}\n"
         f"LITELLM_SALT_KEY=sk-{secrets.token_hex(32)}\n"
-        f"LITELLM_DB_PASSWORD={secrets.token_hex(24)}\n"
+        f"LITELLM_DB_PASSWORD={db_password}\n"
+        f"LITELLM_DATABASE_URL=postgresql://litellm:{db_password}@postgres:5432/litellm\n"
         f"PROXY_API_KEY=sk-{secrets.token_hex(32)}\n"
         f"CLAUDE_CODE_PROXY_KEY=sk-{secrets.token_hex(32)}\n"
         "LITELLM_RPM_LIMIT=120\n"

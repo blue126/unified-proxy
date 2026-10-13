@@ -101,6 +101,14 @@ def main() -> int:
         print("Copy .env.litellm and ChatGPT auth.json to the host first.", file=sys.stderr)
         return 1
     config = settings()
+    db_password = config.get("LITELLM_DB_PASSWORD", "")
+    if (
+        not db_password
+        or config.get("LITELLM_DATABASE_URL")
+        != f"postgresql://litellm:{db_password}@postgres:5432/litellm"
+    ):
+        print("Database URL and password are missing or inconsistent.", file=sys.stderr)
+        return 1
     if config.get("LITELLM_DEPLOY_WORKFLOW_READY") != "1":
         print(
             "Update the main-branch deploy workflow before cutover, then set "
