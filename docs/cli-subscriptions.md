@@ -17,13 +17,18 @@ Run on the Linux ARM64 host from `/opt/unified-proxy`:
 ```bash
 python3 scripts/cli-proxy-init.py
 python3 scripts/cli-proxy-install-plugin.py
+python3 scripts/cli-proxy-adopt-key.py
 docker compose -f compose.cli-proxy.yaml up -d
 python3 scripts/cli-proxy-smoke.py
 ```
 
-The first command generates distinct sidecar client and management keys in the
-ignored `.cli-proxy-api/` directory. It never overwrites an existing config or
-key. The directory and authentication files are owner-only. The installer
+The first command generates a sidecar client key and a distinct management key
+in the ignored `.cli-proxy-api/` directory. It never overwrites an existing
+config or key. The adoption step replaces the temporary sidecar client key
+with the current `PROXY_API_KEY` from the private `.env.litellm`, so existing
+clients can retain their key and `https://<your-domain>/v1` after a validated
+direct cutover. It does not change the running LiteLLM key. The directory and
+authentication files are owner-only. The installer
 checks the release archive and extracted plugin against pinned SHA-256 hashes.
 The smoke check verifies the authenticated API, plugin registration, and model
 catalog; the empty catalog is expected before account login.

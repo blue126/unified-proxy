@@ -33,7 +33,7 @@ def await_plugins(base: str, key: str) -> dict:
     for attempt in range(30):
         try:
             return request(base, "/v0/management/plugins", key)
-        except URLError:
+        except (OSError, URLError):
             if attempt == 29:
                 raise
             time.sleep(1)
@@ -87,7 +87,7 @@ def main() -> None:
             print("Inference passed: " + model)
     except HTTPError as error:
         raise SystemExit(f"CLIProxyAPI request failed (HTTP {error.code}).") from None
-    except URLError:
+    except (OSError, URLError):
         raise SystemExit("CLIProxyAPI did not become reachable in 30 seconds.") from None
 
     print(f"CLIProxyAPI and WorkBuddy plugin are ready; {len(models)} models listed.")
