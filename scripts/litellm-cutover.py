@@ -43,9 +43,14 @@ def set_host_port(port: int) -> None:
             break
     if not changed:
         raise RuntimeError("LITELLM_HOST_PORT is missing from .env.litellm")
+    original = ENV_FILE.stat()
     descriptor, name = tempfile.mkstemp(prefix=".env.litellm-", dir=ROOT)
     replacement = Path(name)
     try:
+        # The cutover runs as root, but subsequent deploys read this file as
+        # the unprivileged SSH user.
+        os.fchown(descriptor, original.st_uid, original.st_gid)
+        os.fchmod(descriptor, original.st_mode & 0o777)
         with os.fdopen(descriptor, "w", encoding="utf-8") as file:
             file.write("\n".join(lines) + "\n")
         os.replace(replacement, ENV_FILE)
