@@ -74,6 +74,8 @@ def main() -> int:
             key,
             {
                 "model": "gpt-6-luna",
+                # The default can complete with no output text on this route.
+                "reasoning": {"effort": "none"},
                 "input": [
                     {
                         "role": "user",

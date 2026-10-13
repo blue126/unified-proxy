@@ -1,9 +1,9 @@
 # LiteLLM migration
 
-The repository now has a LiteLLM 1.105.0 target stack. The current Node service
-continues to serve production until a separate cutover is authorized and run.
-The target keeps the existing HTTPS domain and `/v1` path, with new client
-keys because LiteLLM virtual keys must start with `sk-`.
+LiteLLM 1.105.0 now serves production on the existing HTTPS domain and `/v1`
+path. The former Node systemd service is disabled and its code is retained for
+rollback. The production gateway uses new `sk-` virtual keys; the old Node key
+ceased working at cutover.
 
 ## What each credential does
 
@@ -26,7 +26,7 @@ Sources: [ChatGPT subscription provider](https://docs.litellm.ai/docs/providers/
 [Claude Code subscription routing](https://docs.litellm.ai/docs/tutorials/claude_code_max_subscription),
 [Anthropic's third-party access guidance](https://support.claude.com/en/articles/13189465-log-in-to-your-claude-account).
 
-## Prepare without touching the running service
+## Initial preparation (completed on the current server)
 
 1. Install Docker Engine and Docker Compose. The VM already has both. The
    `compose.yaml` file binds LiteLLM only to localhost, initially on port 4000;
@@ -77,7 +77,7 @@ for `stream: false`.
 
 ## Cutover and rollback
 
-The prepared `scripts/litellm-cutover.py` starts LiteLLM on localhost:4000,
+The one-time `scripts/litellm-cutover.py` starts LiteLLM on localhost:4000,
 registers the two client keys as scoped LLM-only virtual keys, checks the model list
 and a real GPT-6 Luna response, then stops the Node service and moves LiteLLM
 to localhost:3456. Caddy can continue using its current upstream port. On a
@@ -85,19 +85,18 @@ failed switch it restores the Node service. It leaves the old Node credentials
 in place for rollback.
 
 The main-branch deployment workflow checks for `.litellm-active` on the VM.
-It continues to deploy Node until the validated one-time cutover writes that
-marker. Once the marker exists, it updates LiteLLM's Compose/config files
-and restarts only the new gateway. `scripts/smoke.sh` selects the
-matching runtime's checks. Set `LITELLM_DEPLOY_WORKFLOW_READY=1` in the
-private config only after this workflow change is merged and its CI passes.
-The helper refuses to stop Node before then.
+That marker now exists, so pushes to `main` update LiteLLM's Compose/config
+files and restart the new gateway. `scripts/smoke.sh` selects the matching
+runtime's checks. The private config has
+`LITELLM_DEPLOY_WORKFLOW_READY=1`; the helper refuses to stop Node without it.
 
-Once the workflow is updated and the private files are in place, the operator
-can run `sudo python3 /opt/unified-proxy/scripts/litellm-cutover.py`. Then
-replace the client key in every client, in the local `.env.secrets`, and in
-the GitHub `PROXY_API_KEY` secret. The old key stops working at cutover.
-Check `/health/readiness` and run `scripts/litellm-smoke.py` with the
-new key.
+The cutover has run. The local `.env.secrets` and GitHub `PROXY_API_KEY`
+secret hold the new key. External clients still holding the old key must be
+updated individually. The public `/health/readiness` endpoint and a real
+GPT-6 Luna call were verified after cutover. The helper refuses to run again
+while `.litellm-active` exists.
+The old `scripts/rotate-proxy-key.sh` refuses to run while LiteLLM is active
+because it only knows how to rotate the retired Node key.
 
 For a manual rollback, stop the LiteLLM container, restore
 `LITELLM_HOST_PORT=4000` in `.env.litellm`, start the old
