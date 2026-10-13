@@ -1,0 +1,36 @@
+# Optional subscription sidecar. Start and validate it independently before
+# adding any of its models to LiteLLM.
+name: unified-proxy-cli
+
+services:
+  cli-proxy-api:
+    # CLIProxyAPI v8.0.27, linux/arm64. Pin the published image digest.
+    image: eceasy/cli-proxy-api@sha256:b7cf456bf6ef7f6489f18144e7cc166dbb8b2e5f46d6ee8881a321aaea563730
+    command: ["./CLIProxyAPI", "--config", "/CLIProxyAPI/config.yaml"]
+    user: "${CLI_PROXY_UID:-1001}:${CLI_PROXY_GID:-1001}"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 128
+    restart: unless-stopped
+    volumes:
+      - ./.cli-proxy-api/config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./.cli-proxy-api/auths:/state
+      - ./.cli-proxy-api/plugins:/plugins:ro
+    ports:
+      - "127.0.0.1:8317:8317"
+      # OAuth callback ports remain private to the server and SSH tunnels.
+      - "127.0.0.1:1455:1455"
+      - "127.0.0.1:54545:54545"
+      - "127.0.0.1:51121:51121"
+    networks: [litellm]
+
+networks:
+  litellm:
+    external: true
+    name: unified-proxy-litellm_default

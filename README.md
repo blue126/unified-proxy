@@ -31,4 +31,6 @@ Pushing reviewed changes to `main` runs [the deploy workflow](.github/workflows/
 
 The original `PROXY_API_KEY` ceased working at cutover. Update any external clients still holding it to the new key; the local `.env.secrets` and GitHub Actions secret already use the new key. The [migration and rollback guide](docs/litellm-migration.md) covers credential scope, deployment, and recovery. The [legacy Node guide](docs/legacy-node.md) documents the retired runtime.
 
+An optional [subscription sidecar](docs/cli-subscriptions.md) can be staged on a private port before its models are exposed through the public gateway.
+
 `scripts/rotate-proxy-key.sh` is a legacy Node helper and refuses to run while LiteLLM is active; it does not rotate LiteLLM virtual keys.
