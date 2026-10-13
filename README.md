@@ -30,3 +30,5 @@ The stack is defined in `compose.yaml` and `litellm/config.yaml`. LiteLLM binds 
 Pushing reviewed changes to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server's `.litellm-active` marker selects the LiteLLM deployment path. [The monitor workflow](.github/workflows/monitor.yml) checks public readiness, the model list, and a real GPT-6 Luna response using the GitHub `PROXY_API_KEY` secret. To run the same check locally, put the current key and domain in `.env.secrets` and use `npm run smoke`. This live check consumes subscription quota. `npm test` runs side-effect-free unit tests.
 
 The original `PROXY_API_KEY` ceased working at cutover. Update any external clients still holding it to the new key; the local `.env.secrets` and GitHub Actions secret already use the new key. The [migration and rollback guide](docs/litellm-migration.md) covers credential scope, deployment, and recovery. The [legacy Node guide](docs/legacy-node.md) documents the retired runtime.
+
+`scripts/rotate-proxy-key.sh` is a legacy Node helper and refuses to run while LiteLLM is active; it does not rotate LiteLLM virtual keys.

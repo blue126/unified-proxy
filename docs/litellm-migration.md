@@ -95,6 +95,8 @@ secret hold the new key. External clients still holding the old key must be
 updated individually. The public `/health/readiness` endpoint and a real
 GPT-6 Luna call were verified after cutover. The helper refuses to run again
 while `.litellm-active` exists.
+The old `scripts/rotate-proxy-key.sh` refuses to run while LiteLLM is active
+because it only knows how to rotate the retired Node key.
 
 For a manual rollback, stop the LiteLLM container, restore
 `LITELLM_HOST_PORT=4000` in `.env.litellm`, start the old

@@ -24,6 +24,16 @@ done
 SSH_KEY_FILE="${OCI_SSH_KEY_FILE/#\~/$HOME}"
 [ -f "$SSH_KEY_FILE" ] || { echo "Error: SSH key file not found: $SSH_KEY_FILE"; exit 1; }
 
+# This script rotates only the retired Node service's key. Running it against
+# LiteLLM would change the wrong server file and invalidate the GitHub key.
+if ssh -i "$SSH_KEY_FILE" -o BatchMode=yes -o StrictHostKeyChecking=yes \
+  "${OCI_USER}@${OCI_HOST}" 'test ! -e /opt/unified-proxy/.litellm-active'; then
+  :
+else
+  echo "Refusing legacy key rotation: LiteLLM is active or the server state could not be verified." >&2
+  exit 1
+fi
+
 # Generate new key
 NEW_KEY=$(openssl rand -hex 32)
 echo "Generated new PROXY_API_KEY: ${NEW_KEY:0:8}...${NEW_KEY: -4} (truncated for display)"
