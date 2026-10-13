@@ -1,5 +1,5 @@
-# Optional subscription sidecar. Start and validate it independently before
-# adding any of its models to LiteLLM.
+# Subscription gateway staged on its own private Docker network. It can later
+# become the public gateway or be connected to LiteLLM as an upstream.
 name: unified-proxy-cli
 
 services:
@@ -28,9 +28,3 @@ services:
       - "127.0.0.1:1455:1455"
       - "127.0.0.1:54545:54545"
       - "127.0.0.1:51121:51121"
-    networks: [litellm]
-
-networks:
-  litellm:
-    external: true
-    name: unified-proxy-litellm_default

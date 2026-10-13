@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
@@ -28,6 +29,17 @@ def request(base: str, path: str, key: str, payload: dict | None = None) -> dict
         return json.load(response)
 
 
+def await_plugins(base: str, key: str) -> dict:
+    for attempt in range(30):
+        try:
+            return request(base, "/v0/management/plugins", key)
+        except URLError:
+            if attempt == 29:
+                raise
+            time.sleep(1)
+    raise AssertionError("unreachable")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
@@ -40,7 +52,7 @@ def main() -> None:
     management_key = (private / "management-key").read_text().strip()
 
     try:
-        plugin_list = request(args.base_url, "/v0/management/plugins", management_key)
+        plugin_list = await_plugins(args.base_url, management_key)
         workbuddy = next(
             (item for item in plugin_list.get("plugins", []) if item.get("id") == "workbuddy"),
             None,
@@ -75,6 +87,8 @@ def main() -> None:
             print("Inference passed: " + model)
     except HTTPError as error:
         raise SystemExit(f"CLIProxyAPI request failed (HTTP {error.code}).") from None
+    except URLError:
+        raise SystemExit("CLIProxyAPI did not become reachable in 30 seconds.") from None
 
     print(f"CLIProxyAPI and WorkBuddy plugin are ready; {len(models)} models listed.")
 

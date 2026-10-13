@@ -1,8 +1,8 @@
 # Experimental subscription sidecar
 
 This project can stage CLIProxyAPI beside the running LiteLLM gateway. The
-sidecar listens only on localhost port 8317 and shares LiteLLM's private Docker
-network. Staging it does not change the public API, model catalog, or client key.
+sidecar listens only on localhost port 8317 on its own private Docker network.
+Staging it does not change the public API, model catalog, or client key.
 
 The pinned components are [CLIProxyAPI v8.0.27](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.27)
 and the [WorkBuddy plugin v0.3.2](https://github.com/WslzGmzs/workbuddy-cli-proxy/releases/tag/v0.3.2).
@@ -49,8 +49,14 @@ credentials.
 
 | Entry | Benefit | Work required |
 | --- | --- | --- |
-| LiteLLM → CLIProxyAPI | Retains the current public key, GPT route, rate limits, and deployment monitor | Add selected sidecar models to LiteLLM and keep two gateway processes |
-| CLIProxyAPI directly | One gateway process for the subscription routes | Revalidate ChatGPT authentication, key scope, rate limits, monitoring, and client compatibility before replacing the public port |
+| CLIProxyAPI directly | One gateway process for the subscription routes; its own key can preserve the current public key value | Revalidate ChatGPT authentication and client compatibility; recreate the current RPM/TPM limits and deployment monitor if still wanted |
+| LiteLLM → CLIProxyAPI | Retains the current GPT route and LiteLLM key controls | Connect the Docker networks, add selected sidecar models to LiteLLM, and keep two gateway processes |
+
+Direct CLIProxyAPI is the simpler target if its real account logins and model
+calls pass. Reusing a client key and adapting the smoke workflow are small
+changes. The current LiteLLM RPM/TPM key limits do not transfer automatically;
+decide whether to recreate them at the edge. OAuth refresh, model availability,
+and protocol compatibility are the substantive validation gates.
 
 Keep the public LiteLLM route until the selected accounts and model calls have
 passed on the sidecar. Only then update the deployment workflow and public
