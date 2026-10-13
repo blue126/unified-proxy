@@ -306,9 +306,9 @@ curl https://your-proxy.example.com/v1/chat/completions \
 
 ```bash
 ACCESS_TOKEN=$(sudo python3 -c "import json;print(json.load(open('/opt/unified-proxy/auth.json'))['openai']['accessToken'])")
-curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.150.0" \
+curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.157.0" \
   -H "authorization: Bearer $ACCESS_TOKEN" \
-  -H "originator: codex_cli_rs" -H "version: 0.150.0" \
+  -H "originator: codex_cli_rs" -H "version: 0.157.0" \
   | python3 -c "
 import sys, json
 for m in json.load(sys.stdin)['models']:
@@ -445,7 +445,7 @@ opencode
 | `OPENAI_ACCESS_TOKEN` | _（空）_ | OpenAI 兜底 access token。在 `auth.json` 未找到 token 时使用。 |
 | `OPENAI_ACCOUNT_ID` | _（空）_ | ChatGPT account ID。可选 —— ChatGPT 后端不强制要求该 header。 |
 | `ALERT_WEBHOOK_URL` | _（空）_ | 设置后，token 刷新失败与恢复会以 `{"text": "..."}` POST 到该地址（兼容 Slack/Discord）。告警在第 1、5、20 次及此后每 100 次连续失败时触发，不会每次重试都发。无论是否设置，失败都会写日志。 |
-| `CODEX_CLI_VERSION` | `0.150.0` | 上报给 ChatGPT 后端的 Codex CLI 版本号。它决定后端愿意提供哪些模型：新模型在此值提升前会被拒绝并提示 "requires a newer version of Codex"。 |
+| `CODEX_CLI_VERSION` | `0.157.0` | 上报给 ChatGPT 后端的 Codex CLI 版本号。它决定后端愿意提供哪些模型：新模型在此值提升前会被拒绝并提示 "requires a newer version of Codex"。 |
 | `LOG_ALL_REQUESTS` | _(未设置)_ | 设为 `1` 时记录所有请求，而不只是失败的。默认关闭，避免高频健康客户端的正常请求淹没 4xx/5xx 日志。 |
 
 ---

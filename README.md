@@ -309,9 +309,9 @@ directly from the host:
 
 ```bash
 ACCESS_TOKEN=$(sudo python3 -c "import json;print(json.load(open('/opt/unified-proxy/auth.json'))['openai']['accessToken'])")
-curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.150.0" \
+curl -s "https://chatgpt.com/backend-api/codex/models?client_version=0.157.0" \
   -H "authorization: Bearer $ACCESS_TOKEN" \
-  -H "originator: codex_cli_rs" -H "version: 0.150.0" \
+  -H "originator: codex_cli_rs" -H "version: 0.157.0" \
   | python3 -c "
 import sys, json
 for m in json.load(sys.stdin)['models']:
@@ -451,7 +451,7 @@ Environment variables (set in `/opt/unified-proxy/.env` on the server, or export
 | `OPENAI_ACCESS_TOKEN` | _(none)_ | Fallback OpenAI access token. Used if no token is found in `auth.json`. |
 | `OPENAI_ACCOUNT_ID` | _(none)_ | ChatGPT account ID. Optional — the ChatGPT backend accepts requests without it. |
 | `ALERT_WEBHOOK_URL` | _(none)_ | If set, token-refresh failures and recoveries are POSTed here as `{"text": "..."}` (Slack/Discord-compatible). Alerts fire on the 1st, 5th, 20th and every 100th consecutive failure — not on every retry. Failures are always logged regardless. |
-| `CODEX_CLI_VERSION` | `0.150.0` | Codex CLI version reported to the ChatGPT backend. This gates which models the backend will serve: a newer model may be rejected with "requires a newer version of Codex" until this is raised. |
+| `CODEX_CLI_VERSION` | `0.157.0` | Codex CLI version reported to the ChatGPT backend. This gates which models the backend will serve: a newer model may be rejected with "requires a newer version of Codex" until this is raised. |
 | `LOG_ALL_REQUESTS` | _(unset)_ | Set to `1` to log every request, not just failures. Off by default so a frequent healthy poller cannot bury the 4xx/5xx lines. |
 
 ---
