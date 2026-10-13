@@ -1,7 +1,7 @@
 name: Monitor deployed proxy
 
-# scripts/smoke.sh selects Node or LiteLLM checks from the deployed readiness
-# endpoint. LiteLLM checks ChatGPT inference; Node keeps both provider checks.
+# scripts/smoke.sh detects the deployed runtime. CLIProxyAPI verifies GPT,
+# Claude, and Gemini live calls; earlier runtimes keep their rollback checks.
 on:
   schedule:
     - cron: '0 */6 * * *'

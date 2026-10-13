@@ -36,7 +36,15 @@ jobs:
             # Clone latest code
             git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMPDIR"
 
-            if [ -f "$INSTALL_DIR/.litellm-active" ]; then
+            if [ -f "$INSTALL_DIR/.cli-proxy-active" ]; then
+              cp "$TMPDIR/compose.cli-proxy.yaml" "$INSTALL_DIR/compose.cli-proxy.yaml"
+              mkdir -p "$INSTALL_DIR/scripts"
+              cp "$TMPDIR"/scripts/cli-proxy-*.py "$INSTALL_DIR/scripts/"
+              cd "$INSTALL_DIR"
+              python3 scripts/cli-proxy-install-plugin.py
+              docker compose -f compose.cli-proxy.yaml up -d
+              python3 scripts/cli-proxy-smoke.py
+            elif [ -f "$INSTALL_DIR/.litellm-active" ]; then
               cp "$TMPDIR/compose.yaml" "$INSTALL_DIR/compose.yaml"
               mkdir -p "$INSTALL_DIR/litellm" "$INSTALL_DIR/scripts"
               cp "$TMPDIR/litellm/config.yaml" "$INSTALL_DIR/litellm/config.yaml"

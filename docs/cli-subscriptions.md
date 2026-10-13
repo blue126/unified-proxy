@@ -1,4 +1,4 @@
-# Experimental subscription sidecar
+# CLIProxyAPI deployment and rollback
 
 This project can stage CLIProxyAPI beside the running LiteLLM gateway. The
 sidecar listens only on localhost port 8317 on its own private Docker network.
@@ -8,7 +8,9 @@ The pinned components are [CLIProxyAPI v8.0.27](https://github.com/router-for-me
 and the [WorkBuddy plugin v0.3.2](https://github.com/WslzGmzs/workbuddy-cli-proxy/releases/tag/v0.3.2).
 The image and plugin release hashes are fixed in the Compose file and installer.
 The plugin registers successfully with v8.0.27 in an isolated Linux ARM64 run.
-This verifies loading, not account access or inference.
+ChatGPT, Claude, and Google logins and real calls were verified on the server,
+including recovery after restarting the gateway. CodeBuddy login is deferred;
+it does not block the independently verified providers from being deployed.
 
 ## Stage without changing public traffic
 
@@ -33,7 +35,7 @@ checks the release archive and extracted plugin against pinned SHA-256 hashes.
 The smoke check verifies the authenticated API, plugin registration, and model
 catalog; the empty catalog is expected before account login.
 
-Claude, Google Antigravity, and CodeBuddy each require their own interactive
+ChatGPT/Codex, Claude, Google Antigravity, and CodeBuddy each require their own interactive
 authorization. Complete those logins only with the intended account. The
 sidecar's management and OAuth callback ports bind to server localhost; use
 SSH forwarding for a browser on another machine. Forward the main port 8317
@@ -75,3 +77,32 @@ and protocol compatibility are the substantive validation gates.
 Keep the public LiteLLM route until the selected accounts and model calls have
 passed on the sidecar. Only then update the deployment workflow and public
 routing for the chosen entry.
+
+## Apply the direct cutover
+
+The helper first validates the actual Caddy replacement and makes GPT, Claude,
+and Gemini calls on port 8317. Its check mode leaves public routing untouched:
+
+```bash
+sudo python3 scripts/cli-proxy-cutover.py --check --base-url 'https://<your-domain>'
+```
+
+After the updated main deployment workflow has passed, apply it with
+`--workflow-ready` in place of `--check`. The helper saves the prior Caddyfile
+under `.cli-proxy-api/rollback/`, changes the upstream to port 8317 while keeping
+the original domain, blocks public management/callback paths, and runs the same
+live checks through HTTPS with the original key. After those pass, it stops
+LiteLLM and Postgres and disables their container restart policies. It validates
+the public API once more after retirement. Failure restores the prior Caddyfile
+and LiteLLM containers. Private configuration, OAuth state, and the database
+volume are retained for recovery.
+
+The `.cli-proxy-active` marker takes priority in the deployment workflow.
+Scheduled monitoring detects the gateway runtime and tests three authorized
+providers. Add CodeBuddy inference coverage after its account is logged in.
+
+For a later manual rollback, restore the legacy container policies to
+`unless-stopped`, run the original Compose stack with `.env.litellm` and wait for
+readiness, copy `.cli-proxy-api/rollback/Caddyfile.before-cli-proxy` over the
+existing Caddyfile, validate and reload Caddy, then remove `.cli-proxy-active`.
+The client key has the same value in both gateways.

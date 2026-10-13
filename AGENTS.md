@@ -16,9 +16,10 @@
 
 This is a public repository: never commit secret values, the real domain, or host.
 
-- Values live in `.env.secrets` (gitignored; template `.env.secrets.example`) and on the
-  server at `/opt/unified-proxy/.env`; GitHub secrets mirror them (`./scripts/push-secrets.sh`).
-- `PROXY_API_KEY` must match across all three — rotate with `./scripts/rotate-proxy-key.sh`.
+- Connection values live in ignored `.env.secrets` (template `.env.secrets.example`);
+  CLIProxyAPI private config and OAuth state live under `/opt/unified-proxy/.cli-proxy-api/`.
+- The current client key must match local `PROXY_API_KEY`, CLIProxyAPI's access key,
+  and the GitHub `PROXY_API_KEY` secret. The legacy Node rotation script cannot rotate it.
 - Clients connect with base URL `https://$PROXY_DOMAIN/v1` and that same key.
 - Variable semantics and client setup are documented once in `README.md`; do not duplicate here.
 
