@@ -1,9 +1,7 @@
 name: Monitor deployed proxy
 
-# Token auth, quota, model availability, and upstream reachability can all fail
-# while the proxy process itself remains healthy. The smoke test reports the
-# exact provider-level reason, warns when one provider is down, and fails the
-# workflow only when both providers are unavailable.
+# scripts/smoke.sh selects Node or LiteLLM checks from the deployed readiness
+# endpoint. LiteLLM checks ChatGPT inference; Node keeps both provider checks.
 on:
   schedule:
     - cron: '0 */6 * * *'

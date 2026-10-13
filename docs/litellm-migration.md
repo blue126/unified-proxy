@@ -84,14 +84,13 @@ to localhost:3456. Caddy can continue using its current upstream port. On a
 failed switch it restores the Node service. It leaves the old Node credentials
 in place for rollback.
 
-**The existing main-branch deployment workflow still restarts the Node
-service. Do not run the cutover until that workflow is updated for the new
-runtime and the production change is explicitly authorized.** Otherwise a
-later merge can conflict with LiteLLM on port 3456. The new LiteLLM stack and
-cutover helper are ready for review; the production workflow change is a
-separate approval step. The helper checks
-`LITELLM_DEPLOY_WORKFLOW_READY=1` before it touches either service; leave it
-at the generated default of `0` until that workflow is updated.
+The main-branch deployment workflow checks for `.litellm-active` on the VM.
+It continues to deploy Node until the validated one-time cutover writes that
+marker. Once the marker exists, it updates LiteLLM's Compose/config files
+and restarts only the new gateway. `scripts/smoke.sh` selects the
+matching runtime's checks. Set `LITELLM_DEPLOY_WORKFLOW_READY=1` in the
+private config only after this workflow change is merged and its CI passes.
+The helper refuses to stop Node before then.
 
 Once the workflow is updated and the private files are in place, the operator
 can run `sudo python3 /opt/unified-proxy/scripts/litellm-cutover.py`. Then
