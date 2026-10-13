@@ -46,7 +46,7 @@ const OPENAI_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 // The version we report gates which models the backend will serve us: newer models
 // are rejected with "requires a newer version of Codex" until this is bumped.
 // Override via env when a new model lands before this default catches up.
-const CODEX_CLI_VERSION = process.env.CODEX_CLI_VERSION || '0.150.0';
+const CODEX_CLI_VERSION = process.env.CODEX_CLI_VERSION || '0.157.0';
 const CODEX_CLI_UA = `codex_cli_rs/${CODEX_CLI_VERSION}`;
 // Authoritative, version-gated model catalog for the signed-in account.
 const OPENAI_MODELS_URL = 'https://chatgpt.com/backend-api/codex/models';
