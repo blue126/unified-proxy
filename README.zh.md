@@ -1,5 +1,8 @@
 # Unified Proxy
 
+> **LiteLLM 迁移进行中：** [迁移说明](docs/litellm-migration.md)包含新网关配置和分阶段切换步骤。
+> 下文所述 Node 服务仍是当前线上运行的版本，直到另行授权并完成切换。
+
 自托管的 OpenAI 兼容 API 代理，通过 OAuth 订阅账号（无需 API 额度）将请求路由到 **Anthropic Claude** 和 **OpenAI GPT**。
 
 - **Anthropic**：Claude Max 订阅，PKCE OAuth 授权

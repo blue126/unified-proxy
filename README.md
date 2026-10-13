@@ -1,5 +1,9 @@
 # Unified Proxy
 
+> **LiteLLM migration in progress:** The [migration guide](docs/litellm-migration.md)
+> contains the new gateway configuration and staged cutover. The Node service
+> described below remains the production runtime until the separate cutover.
+
 A self-hosted OpenAI-compatible API proxy that routes requests to **Anthropic Claude** and **OpenAI GPT** using OAuth subscriptions — no API credits needed.
 
 - **Anthropic**: Claude Max subscription via PKCE OAuth

@@ -1,0 +1,59 @@
+# Public GPT model names stay compatible with clients of the previous proxy.
+# Add concrete GPT entries when new models arrive. The Claude wildcard accepts
+# model IDs sent by each signed-in Claude Code client.
+model_list:
+  - model_name: gpt-6.1-sol
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-6.1-sol
+  - model_name: gpt-6-astra
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-6-astra
+  - model_name: gpt-6-sol
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-6-sol
+  - model_name: gpt-6-luna
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-6-luna
+  - model_name: gpt-5.6-sol
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-5.6-sol
+  - model_name: gpt-5.6-terra
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-5.6-terra
+  - model_name: gpt-5.6-luna
+    model_info:
+      mode: responses
+      access_groups: ["chatgpt-subscription"]
+    litellm_params:
+      model: chatgpt/gpt-5.6-luna
+
+  - model_name: "anthropic/*"
+    litellm_params:
+      model: "anthropic/*"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+
+# One Claude Code user's expired OAuth token must not cool down the shared route
+# for every other signed-in user.
+router_settings:
+  disable_cooldowns: true
