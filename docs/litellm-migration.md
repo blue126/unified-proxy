@@ -1,9 +1,11 @@
 # LiteLLM migration
 
-LiteLLM 1.105.0 now serves production on the existing HTTPS domain and `/v1`
-path. The former Node systemd service is disabled and its code is retained for
-rollback. The production gateway uses new `sk-` virtual keys; the old Node key
-ceased working at cutover.
+> Archived reference for the previous LiteLLM runtime. See the [current
+> README](../README.md) and [CLIProxyAPI deployment guide](cli-subscriptions.md).
+
+This guide records the earlier migration to LiteLLM 1.105.0 on the existing
+HTTPS domain and `/v1` path. Its client key is retained by the subsequent
+CLIProxyAPI gateway; the old Node key ceased working during the LiteLLM cutover.
 
 ## What each credential does
 

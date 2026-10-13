@@ -5,8 +5,8 @@
 #   ./scripts/smoke.sh                        # reads BASE_URL + KEY from .env.secrets
 #   BASE_URL=https://... PROXY_API_KEY=... ./scripts/smoke.sh   # override via env
 #
-# LiteLLM verifies ChatGPT subscription inference. The Node path keeps its
-# two-provider behavior until the one-time cutover.
+# CLIProxyAPI checks GPT, Claude, and Gemini. Earlier runtimes retain their
+# existing checks during a staged cutover or rollback.
 
 set -uo pipefail
 
@@ -32,6 +32,9 @@ if [ -z "$PROXY_API_KEY" ] && [ -f "$SECRETS_FILE" ]; then
 fi
 
 export BASE_URL PROXY_API_KEY
+if curl --fail --silent --max-time 10 "${BASE_URL%/}/" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("message") == "CLI Proxy API Server" else 1)' 2>/dev/null; then
+  exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public
+fi
 if curl --fail --silent --max-time 10 "${BASE_URL%/}/health/readiness" >/dev/null 2>&1; then
   exec python3 "${SCRIPT_DIR}/litellm-smoke.py"
 fi

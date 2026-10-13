@@ -1,34 +1,38 @@
 # Unified Proxy
 
-The production gateway runs [LiteLLM](https://docs.litellm.ai/) on the existing HTTPS domain. OpenAI and Codex clients use one ChatGPT subscription login held by the server. Claude Code users sign in to their own Claude subscription; the gateway forwards each user's OAuth credential with that request. The former Node proxy is disabled on the server and retained in the repository for rollback.
+The gateway runs [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) behind Caddy on the existing HTTPS domain. It forwards requests through separately authorized ChatGPT, Claude, and Google Antigravity accounts. The WorkBuddy plugin is installed; its CodeBuddy/WorkBuddy account login is pending. The client API key and the existing seven GPT model IDs are preserved from the LiteLLM deployment.
 
 ## Connect a client
 
-| Client | Base URL | Gateway key | Subscription credential |
-| --- | --- | --- | --- |
-| OpenAI / Codex | `https://<your-domain>/v1` | `PROXY_API_KEY` | Server's ChatGPT login |
-| Claude Code | `https://<your-domain>` | `CLAUDE_CODE_PROXY_KEY` in a custom header | The user's Claude Code login |
+OpenAI-compatible clients retain `https://<your-domain>/v1` and their existing `PROXY_API_KEY`. Use `Authorization: Bearer <PROXY_API_KEY>`, list models with `GET /v1/models`, and call `POST /v1/chat/completions` or `POST /v1/responses`. The catalog also exposes Claude and Gemini names after those accounts are authorized. Catalog presence does not prove every model is currently served by the account.
 
-The production domain and GPT key are in the ignored local `.env.secrets` and server private config. The Claude Code gateway key is in the server's private `.env.litellm`. Keep these values out of commits and logs. The two keys are scoped separately: the GPT key cannot call Claude models, and the Claude Code key cannot call GPT models. Both have request and token rate limits. LiteLLM currently records ChatGPT subscription spend as $0, so a dollar budget does not limit that traffic.
+| Provider | Tested model | Authentication held by the gateway |
+| --- | --- | --- |
+| GPT / Codex | `gpt-6-luna` | Dedicated ChatGPT OAuth login |
+| Claude | `claude-sonnet-5` | Dedicated Claude OAuth login |
+| Google | `gemini-3-flash` | Dedicated Antigravity OAuth login |
+| CodeBuddy / WorkBuddy | Pending account login | WorkBuddy plugin OAuth or platform key |
 
-OpenAI-compatible clients can list their permitted models with `GET /v1/models` and call `POST /v1/responses` or, for supported models, `POST /v1/chat/completions` using `Authorization: Bearer <PROXY_API_KEY>`. The configured catalog includes `gpt-6-luna` and `gpt-6.1-sol`; catalog presence does not guarantee an account can call every model. `GET /health/readiness` checks the gateway without a key.
+The seven preserved GPT IDs are `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT Responses JSON and streaming, plus Claude streaming and function calls, were tested before cutover.
 
-For Claude Code, log in with your own Claude subscription and set:
+Claude-compatible clients can call `POST /v1/messages` using the gateway key. For a new Claude Code client configuration:
 
 ```bash
 export ANTHROPIC_BASE_URL="https://<your-domain>"
-export ANTHROPIC_CUSTOM_HEADERS="x-litellm-api-key: Bearer <CLAUDE_CODE_PROXY_KEY>"
+export ANTHROPIC_AUTH_TOKEN="<PROXY_API_KEY>"
 claude
 ```
 
-Claude Code provides its OAuth `Authorization` header. Do not set `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, or `apiKeyHelper` in that client session if you intend to use the subscription. Other Claude clients need a separately billed Anthropic API key and a separately scoped gateway key; the Claude subscription route is specific to Claude Code.
+The previous LiteLLM-specific `x-litellm-api-key` setup belongs to the archived LiteLLM runtime. The community bridge calls provider endpoints using stored OAuth credentials; it does not launch the official CLI for every request. See the provider terms before using subscription authentication in another application.
 
 ## Operate the gateway
 
-The stack is defined in `compose.yaml` and `litellm/config.yaml`. LiteLLM binds to localhost port 3456 behind Caddy, and Postgres uses a private persistent Docker volume. `/opt/unified-proxy/.env.litellm` holds the admin key, encryption salt, database password, and client keys. `/opt/unified-proxy/.litellm/chatgpt/auth.json` holds the refreshable ChatGPT login. Keep the token file writable for the single LiteLLM instance and preserve the salt and database volume across restarts.
+`compose.cli-proxy.yaml` pins CLIProxyAPI v8.0.27 by image digest and binds its API and OAuth callback ports to server localhost. `scripts/cli-proxy-install-plugin.py` installs WorkBuddy v0.3.2 only after verifying both archive and binary SHA-256 hashes. Caddy forwards public client requests to localhost port 8317, blocks management and OAuth callback routes, and maps `/health/readiness` and `/health` to the gateway's process-level response.
 
-Pushing reviewed changes to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server's `.litellm-active` marker selects the LiteLLM deployment path. [The monitor workflow](.github/workflows/monitor.yml) checks public readiness, the model list, and a real GPT-6 Luna response using the GitHub `PROXY_API_KEY` secret. To run the same check locally, put the current key and domain in `.env.secrets` and use `npm run smoke`. This live check consumes subscription quota. `npm test` runs side-effect-free unit tests.
+Private state lives in `/opt/unified-proxy/.cli-proxy-api/`: `config.yaml` holds gateway settings, `upstream-key` mirrors its client key, `management-key` is separate, and `auths/` holds refreshable OAuth credentials. Keep the directory at mode 700 and credential files at mode 600. The local ignored `.env.secrets` and GitHub Actions `PROXY_API_KEY` retain the same client key. Never commit or log these values or the real host/domain.
 
-The original `PROXY_API_KEY` ceased working at cutover. Update any external clients still holding it to the new key; the local `.env.secrets` and GitHub Actions secret already use the new key. The [migration and rollback guide](docs/litellm-migration.md) covers credential scope, deployment, and recovery. The [legacy Node guide](docs/legacy-node.md) documents the retired runtime.
+The current public key permits the registered subscription models. LiteLLM's former per-key 120 RPM and 1,000,000 TPM limits do not carry over; provider account quotas still apply. No separately billed Anthropic API key is configured.
 
-`scripts/rotate-proxy-key.sh` is a legacy Node helper and refuses to run while LiteLLM is active; it does not rotate LiteLLM virtual keys.
+Pushing reviewed code to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server's `.cli-proxy-active` marker selects CLIProxyAPI; the workflow preserves private account state, verifies the pinned plugin, reconciles Compose, and checks the public API. [The monitor workflow](.github/workflows/monitor.yml) runs every six hours and verifies client authentication, the GPT model names, and real GPT, Claude, and Gemini replies. Run the same check with `npm run smoke`; live checks consume subscription quota. `npm test` runs side-effect-free unit tests.
+
+LiteLLM and its Postgres container are stopped with automatic restart disabled after the successful public cutover. Their private state and database volume remain available for rollback. See [deployment and rollback](docs/cli-subscriptions.md), the [archived LiteLLM guide](docs/litellm-migration.md), and the [archived Node guide](docs/legacy-node.md). The legacy Node key-rotation script must not be used to rotate the current gateway key.

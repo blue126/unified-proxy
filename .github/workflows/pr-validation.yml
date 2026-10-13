@@ -21,5 +21,10 @@ jobs:
         run: docker compose --env-file .env.litellm.example -f compose.yaml config --quiet
       - name: Validate migration helper syntax
         run: python3 -m compileall -q scripts/litellm-*.py
+      - name: Validate optional subscription sidecar
+        run: |
+          docker compose -f compose.cli-proxy.yaml config --quiet
+          python3 -m compileall -q scripts/cli-proxy-*.py
+          python3 -m unittest discover -s test -p 'test_cli_proxy_*.py'
       - name: Validate runtime smoke dispatch
         run: bash -n scripts/smoke.sh

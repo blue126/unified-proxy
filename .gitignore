@@ -7,6 +7,8 @@ node_modules/
 .env.litellm
 .litellm/
 .litellm-active
+.cli-proxy-api/
+.cli-proxy-active
 __pycache__/
 *.pyc
 *.anthropic-login.json
