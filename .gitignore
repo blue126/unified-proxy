@@ -4,5 +4,10 @@ node_modules/
 .env
 .env.local
 .env.secrets
+.env.litellm
+.litellm/
+.litellm-active
+__pycache__/
+*.pyc
 *.anthropic-login.json
 *.anthropic-login.json.*.tmp

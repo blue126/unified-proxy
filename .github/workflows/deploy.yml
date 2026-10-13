@@ -7,7 +7,7 @@ on:
     paths-ignore:
       - '**/*.md'
 
-# Credential maintenance briefly stops the same service; serialize both writers.
+# Credential maintenance and deployments share the same host.
 concurrency:
   group: unified-proxy-production
   cancel-in-progress: false
@@ -31,26 +31,32 @@ jobs:
 
             TMPDIR=$(mktemp -d)
             INSTALL_DIR=/opt/unified-proxy
+            trap 'rm -rf "$TMPDIR"' EXIT
 
             # Clone latest code
             git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMPDIR"
 
-            # Copy application files
-            cp "$TMPDIR/server.js"    "$INSTALL_DIR/server.js"
-            cp "$TMPDIR/package.json" "$INSTALL_DIR/package.json"
-
-            # Cleanup
-            rm -rf "$TMPDIR"
-
-            # Reload systemd and restart service
-            sudo systemctl daemon-reload
-            sudo systemctl restart unified-proxy
-
-            # Verify service is running
-            sleep 2
-            sudo systemctl is-active --quiet unified-proxy \
-              && echo "Service restarted successfully" \
-              || (echo "ERROR: service failed to start"; sudo journalctl -u unified-proxy -n 30 --no-pager; exit 1)
+            if [ -f "$INSTALL_DIR/.litellm-active" ]; then
+              cp "$TMPDIR/compose.yaml" "$INSTALL_DIR/compose.yaml"
+              mkdir -p "$INSTALL_DIR/litellm" "$INSTALL_DIR/scripts"
+              cp "$TMPDIR/litellm/config.yaml" "$INSTALL_DIR/litellm/config.yaml"
+              cp "$TMPDIR"/scripts/litellm-*.py "$INSTALL_DIR/scripts/"
+              cd "$INSTALL_DIR"
+              docker compose --env-file .env.litellm -f compose.yaml \
+                -p unified-proxy-litellm up -d --wait --wait-timeout 180
+              curl --fail --silent --show-error \
+                http://127.0.0.1:3456/health/readiness >/dev/null
+            else
+              # Keep deploying the Node service until the validated one-time
+              # cutover writes .litellm-active.
+              cp "$TMPDIR/server.js" "$INSTALL_DIR/server.js"
+              cp "$TMPDIR/package.json" "$INSTALL_DIR/package.json"
+              sudo systemctl daemon-reload
+              sudo systemctl restart unified-proxy
+              sleep 2
+              sudo systemctl is-active --quiet unified-proxy \
+                || (sudo journalctl -u unified-proxy -n 30 --no-pager; exit 1)
+            fi
 
       - name: Smoke test
         env:

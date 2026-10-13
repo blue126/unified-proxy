@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Live smoke test — verifies both deployed upstream providers end to end.
+# Live smoke test for the currently deployed runtime.
 #
 # Usage:
 #   ./scripts/smoke.sh                        # reads BASE_URL + KEY from .env.secrets
 #   BASE_URL=https://... PROXY_API_KEY=... ./scripts/smoke.sh   # override via env
 #
-# Exit codes:
-#   0 = both providers pass, or exactly one provider is degraded (warning)
-#   1 = both providers fail, or the test itself is misconfigured
+# LiteLLM verifies ChatGPT subscription inference. The Node path keeps its
+# two-provider behavior until the one-time cutover.
 
 set -uo pipefail
 
@@ -33,4 +32,7 @@ if [ -z "$PROXY_API_KEY" ] && [ -f "$SECRETS_FILE" ]; then
 fi
 
 export BASE_URL PROXY_API_KEY
+if curl --fail --silent --max-time 10 "${BASE_URL%/}/health/readiness" >/dev/null 2>&1; then
+  exec python3 "${SCRIPT_DIR}/litellm-smoke.py"
+fi
 exec python3 "${SCRIPT_DIR}/smoke.py"

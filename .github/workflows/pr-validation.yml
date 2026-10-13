@@ -17,3 +17,9 @@ jobs:
         with:
           node-version: 20
       - run: npm test
+      - name: Validate LiteLLM Compose configuration
+        run: docker compose --env-file .env.litellm.example -f compose.yaml config --quiet
+      - name: Validate migration helper syntax
+        run: python3 -m compileall -q scripts/litellm-*.py
+      - name: Validate runtime smoke dispatch
+        run: bash -n scripts/smoke.sh
