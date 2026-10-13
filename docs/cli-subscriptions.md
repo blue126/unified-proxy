@@ -36,7 +36,16 @@ catalog; the empty catalog is expected before account login.
 Claude, Google Antigravity, and CodeBuddy each require their own interactive
 authorization. Complete those logins only with the intended account. The
 sidecar's management and OAuth callback ports bind to server localhost; use
-SSH forwarding for a browser on another machine. After login, verify the
+SSH forwarding for a browser on another machine. Forward the main port 8317
+as well as callback ports 1455 (Codex), 54545 (Claude), and 51121 (Google).
+The callback listeners redirect the browser to the main port; forwarding only
+an alternate management port leaves the last authorization step unreachable.
+Use a normal system browser for authorization. The Google consent flow can
+stall in an embedded browser even when account selection works.
+Create a fresh login session if an earlier one expired; saved credentials from
+a completed login do not need to be authorized again.
+
+After login, verify the
 actual account's model catalog and run a real model call, for example:
 
 ```bash
