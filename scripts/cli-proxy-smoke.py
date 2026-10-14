@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the isolated CLIProxyAPI sidecar and optional real model calls."""
+"""Check the CLIProxyAPI gateway and optional real model calls."""
 
 from __future__ import annotations
 

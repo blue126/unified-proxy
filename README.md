@@ -1,6 +1,6 @@
 # Unified Proxy
 
-The gateway runs [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) behind Caddy on the existing HTTPS domain. It forwards requests through separately authorized ChatGPT, Claude, and Google Antigravity accounts. The WorkBuddy plugin is installed; its CodeBuddy/WorkBuddy account login is pending. The client API key and the existing seven GPT model IDs are preserved from the LiteLLM deployment.
+The gateway runs [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) behind Caddy on the existing HTTPS domain. It forwards requests through separately authorized ChatGPT, Claude, and Google Antigravity accounts. The WorkBuddy plugin is authorized with the CodeBuddy/WorkBuddy shared-Credits account. The client API key and the existing seven GPT model IDs are preserved from the LiteLLM deployment.
 
 ## Connect a client
 
@@ -11,9 +11,9 @@ OpenAI-compatible clients retain `https://<your-domain>/v1` and their existing `
 | GPT / Codex | `gpt-6-luna` | Dedicated ChatGPT OAuth login |
 | Claude | `claude-sonnet-5` | Dedicated Claude OAuth login |
 | Google | `gemini-3-flash` | Dedicated Antigravity OAuth login |
-| CodeBuddy / WorkBuddy | Pending account login | WorkBuddy plugin OAuth or platform key |
+| CodeBuddy / WorkBuddy | `glm-5.2`, `kimi-k2.7` | Dedicated WorkBuddy plugin OAuth login |
 
-The seven preserved GPT IDs are `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT Responses JSON and streaming, plus Claude streaming and function calls, were tested before cutover.
+The seven preserved GPT IDs are `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT Responses JSON and streaming, Claude streaming and function calls, and CodeBuddy GLM streaming were tested. CodeBuddy adds `deepseek-v4-flash`, `deepseek-v4-pro`, `glm-5.1`, `glm-5.2`, `glm-5v-turbo`, `hy3`, `hy3-preview`, `hy3-preview-agent`, `kimi-k2.7`, and `minimax-m3-pay`; GLM and Kimi have passed real calls. The authorized catalog currently lists 50 models.
 
 Claude-compatible clients can call `POST /v1/messages` using the gateway key. For a new Claude Code client configuration:
 
@@ -23,7 +23,7 @@ export ANTHROPIC_AUTH_TOKEN="<PROXY_API_KEY>"
 claude
 ```
 
-The previous LiteLLM-specific `x-litellm-api-key` setup belongs to the archived LiteLLM runtime. The community bridge calls provider endpoints using stored OAuth credentials; it does not launch the official CLI for every request. See the provider terms before using subscription authentication in another application.
+The community bridge calls provider endpoints using stored OAuth credentials; it does not launch the official CLI for every request. See the provider terms before using subscription authentication in another application.
 
 ## Operate the gateway
 
@@ -33,6 +33,6 @@ Private state lives in `/opt/unified-proxy/.cli-proxy-api/`: `config.yaml` holds
 
 The current public key permits the registered subscription models. LiteLLM's former per-key 120 RPM and 1,000,000 TPM limits do not carry over; provider account quotas still apply. No separately billed Anthropic API key is configured.
 
-Pushing reviewed code to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server's `.cli-proxy-active` marker selects CLIProxyAPI; the workflow preserves private account state, verifies the pinned plugin, reconciles Compose, and checks the public API. [The monitor workflow](.github/workflows/monitor.yml) runs every six hours and verifies client authentication, the GPT model names, and real GPT, Claude, and Gemini replies. Run the same check with `npm run smoke`; live checks consume subscription quota. `npm test` runs side-effect-free unit tests.
+Pushing reviewed code to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server must have its `.cli-proxy-active` marker; missing activation fails deployment without starting a legacy service. Otherwise, the workflow preserves private account state, verifies the pinned plugin, reconciles Compose, and checks the public API. [The monitor workflow](.github/workflows/monitor.yml) runs every six hours and verifies client authentication, the GPT model names, and real GPT, Claude, Gemini, and CodeBuddy replies. Run the same check with `npm run smoke`; live checks consume subscription quota. `npm test` runs side-effect-free Python unit tests; Python 3.10 or later is required.
 
-LiteLLM and its Postgres container are stopped with automatic restart disabled after the successful public cutover. Their private state and database volume remain available for rollback. See [deployment and rollback](docs/cli-subscriptions.md), the [archived LiteLLM guide](docs/litellm-migration.md), and the [archived Node guide](docs/legacy-node.md). The legacy Node key-rotation script must not be used to rotate the current gateway key.
+The old Node service is masked. LiteLLM/Postgres containers, their database volume, and the old installation files have been removed after verifying a private recovery archive under `/opt/unified-proxy/.retired-proxy/`. Caddy, active OAuth state, the public endpoint, and the current client key are preserved. Legacy runtime code, maintenance workflows, and key-rotation tools are removed from this branch; [the previous version](https://github.com/blue126/unified-proxy/tree/ef54ad375b8840746fb9203a9bada88c80abfb78) retains their history. See [operations and recovery](docs/cli-subscriptions.md).

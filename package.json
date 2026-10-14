@@ -1,17 +1,11 @@
 {
   "name": "unified-proxy",
   "version": "5.0.0",
-  "description": "Multi-provider OAuth proxy - Anthropic Claude + OpenAI GPT via subscription",
+  "description": "CLIProxyAPI subscription gateway deployment and health checks",
   "type": "module",
-  "main": "server.js",
-  "bin": {
-    "unified-proxy": "./server.js"
-  },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test test/*.test.js",
-    "test:integration": "./test.sh",
+    "start": "docker compose -f compose.cli-proxy.yaml up -d",
+    "test": "python3 -m unittest discover -s test -p 'test_cli_proxy_*.py'",
     "smoke": "./scripts/smoke.sh"
   },
   "keywords": [
@@ -28,5 +22,6 @@
   "dependencies": {},
   "engines": {
     "node": ">=20"
-  }
+  },
+  "private": true
 }

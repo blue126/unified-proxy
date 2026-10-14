@@ -1,7 +1,6 @@
 name: Monitor deployed proxy
 
-# scripts/smoke.sh detects the deployed runtime. CLIProxyAPI verifies GPT,
-# Claude, and Gemini live calls; earlier runtimes keep their rollback checks.
+# CLIProxyAPI verifies GPT, Claude, Gemini, and CodeBuddy live calls.
 on:
   schedule:
     - cron: '0 */6 * * *'

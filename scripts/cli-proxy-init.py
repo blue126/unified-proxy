@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create private, stable credentials for the optional CLIProxyAPI sidecar."""
+"""Create private, stable credentials for a new CLIProxyAPI gateway."""
 
 from __future__ import annotations
 

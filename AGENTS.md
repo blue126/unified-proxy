@@ -19,13 +19,12 @@ This is a public repository: never commit secret values, the real domain, or hos
 - Connection values live in ignored `.env.secrets` (template `.env.secrets.example`);
   CLIProxyAPI private config and OAuth state live under `/opt/unified-proxy/.cli-proxy-api/`.
 - The current client key must match local `PROXY_API_KEY`, CLIProxyAPI's access key,
-  and the GitHub `PROXY_API_KEY` secret. The legacy Node rotation script cannot rotate it.
+  and the GitHub `PROXY_API_KEY` secret.
 - Clients connect with base URL `https://$PROXY_DOMAIN/v1` and that same key.
 - Variable semantics and client setup are documented once in `README.md`; do not duplicate here.
 
 ## Validation
 
-- Run `npm test` for the repository's side-effect-free unit test suite.
-- `npm run test:integration` starts an integration server and can exercise configured provider credentials; use it only when the task requires integration coverage.
+- Run `npm test` for the repository's side-effect-free Python unit test suite.
 - `npm run smoke` performs live inference against configured upstream services and is not routine PR validation.
 - `.github/workflows/deploy.yml` deploys on pushes to `main`; agents must not trigger it by pushing directly to `main`.
