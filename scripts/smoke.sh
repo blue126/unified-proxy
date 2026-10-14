@@ -5,8 +5,7 @@
 #   ./scripts/smoke.sh                        # reads BASE_URL + KEY from .env.secrets
 #   BASE_URL=https://... PROXY_API_KEY=... ./scripts/smoke.sh   # override via env
 #
-# CLIProxyAPI checks GPT, Claude, and Gemini. Earlier runtimes retain their
-# existing checks during a staged cutover or rollback.
+# CLIProxyAPI checks GPT, Claude, Gemini, and CodeBuddy.
 
 set -uo pipefail
 
@@ -31,11 +30,7 @@ if [ -z "$PROXY_API_KEY" ] && [ -f "$SECRETS_FILE" ]; then
   PROXY_API_KEY="$(get_secret PROXY_API_KEY)"
 fi
 
+[ -n "$BASE_URL" ] && [ -n "$PROXY_API_KEY" ] \
+  || { echo 'BASE_URL and PROXY_API_KEY are required.' >&2; exit 1; }
 export BASE_URL PROXY_API_KEY
-if curl --fail --silent --max-time 10 "${BASE_URL%/}/" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("message") == "CLI Proxy API Server" else 1)' 2>/dev/null; then
-  exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public
-fi
-if curl --fail --silent --max-time 10 "${BASE_URL%/}/health/readiness" >/dev/null 2>&1; then
-  exec python3 "${SCRIPT_DIR}/litellm-smoke.py"
-fi
-exec python3 "${SCRIPT_DIR}/smoke.py"
+exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public

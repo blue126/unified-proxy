@@ -1,5 +1,4 @@
-# Subscription gateway staged on its own private Docker network. It can later
-# become the public gateway or be connected to LiteLLM as an upstream.
+# Public subscription gateway behind Caddy on a private Docker network.
 name: unified-proxy-cli
 
 services:

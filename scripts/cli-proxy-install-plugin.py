@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the pinned Linux ARM64 WorkBuddy plugin into private sidecar state."""
+"""Install the pinned Linux ARM64 WorkBuddy plugin into private gateway state."""
 
 from __future__ import annotations
 

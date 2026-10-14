@@ -1,108 +1,59 @@
-# CLIProxyAPI deployment and rollback
+# CLIProxyAPI operations and recovery
 
-This project can stage CLIProxyAPI beside the running LiteLLM gateway. The
-sidecar listens only on localhost port 8317 on its own private Docker network.
-Staging it does not change the public API, model catalog, or client key.
+The active gateway is CLIProxyAPI v8.0.27 behind Caddy, with the WorkBuddy v0.3.2 plugin. Both components are pinned by SHA-256. ChatGPT, Claude, Antigravity, and CodeBuddy/WorkBuddy OAuth accounts are authorized. GPT Responses, Claude and Gemini calls, and CodeBuddy GLM/Kimi calls have passed through the public endpoint with the existing key. CodeBuddy GLM streaming also passed. The gateway uses provider endpoints with stored OAuth credentials; it does not launch the official CLI for each request.
 
-The pinned components are [CLIProxyAPI v8.0.27](https://github.com/router-for-me/CLIProxyAPI/releases/tag/v8.0.27)
-and the [WorkBuddy plugin v0.3.2](https://github.com/WslzGmzs/workbuddy-cli-proxy/releases/tag/v0.3.2).
-The image and plugin release hashes are fixed in the Compose file and installer.
-The plugin registers successfully with v8.0.27 in an isolated Linux ARM64 run.
-ChatGPT, Claude, and Google logins and real calls were verified on the server,
-including recovery after restarting the gateway. CodeBuddy login is deferred;
-it does not block the independently verified providers from being deployed.
+## Deploy and verify
 
-## Stage without changing public traffic
-
-Run on the Linux ARM64 host from `/opt/unified-proxy`:
+From `/opt/unified-proxy` on the Linux ARM64 host:
 
 ```bash
+# Only on a new installation: creates keys without overwriting existing state.
 python3 scripts/cli-proxy-init.py
 python3 scripts/cli-proxy-install-plugin.py
-python3 scripts/cli-proxy-adopt-key.py
 docker compose -f compose.cli-proxy.yaml up -d
-python3 scripts/cli-proxy-smoke.py
+python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2
 ```
 
-The first command generates a sidecar client key and a distinct management key
-in the ignored `.cli-proxy-api/` directory. It never overwrites an existing
-config or key. The adoption step replaces the temporary sidecar client key
-with the current `PROXY_API_KEY` from the private `.env.litellm`, so existing
-clients can retain their key and `https://<your-domain>/v1` after a validated
-direct cutover. It does not change the running LiteLLM key. The directory and
-authentication files are owner-only. The installer
-checks the release archive and extracted plugin against pinned SHA-256 hashes.
-The smoke check verifies the authenticated API, plugin registration, and model
-catalog; the empty catalog is expected before account login.
+On a new installation the initializer generates a client key and a distinct management key. Configure clients and the GitHub `PROXY_API_KEY` secret to match the private `upstream-key`; the current deployment already has a matching key and must retain it. Caddy must already route the existing HTTPS domain to localhost:8317, block `/v0/*`, `/v8/*`, `/management.html`, and OAuth callback paths, and map `/health/readiness` and `/health` to `/`. The deployment workflow requires `.cli-proxy-active` and never falls back to a retired service. It updates the Compose file and helpers, checks the pinned plugin, reconciles the gateway, and checks the public API.
 
-ChatGPT/Codex, Claude, Google Antigravity, and CodeBuddy each require their own interactive
-authorization. Complete those logins only with the intended account. The
-sidecar's management and OAuth callback ports bind to server localhost; use
-SSH forwarding for a browser on another machine. Forward the main port 8317
-as well as callback ports 1455 (Codex), 54545 (Claude), and 51121 (Google).
-The callback listeners redirect the browser to the main port; forwarding only
-an alternate management port leaves the last authorization step unreachable.
-Use a normal system browser for authorization. The Google consent flow can
-stall in an embedded browser even when account selection works.
-Create a fresh login session if an earlier one expired; saved credentials from
-a completed login do not need to be authorized again.
+Run `npm run smoke` from a checkout with its ignored `.env.secrets`, or provide `BASE_URL` and `PROXY_API_KEY` in the environment. The public check verifies authenticated models, anonymous-request rejection, blocked management routes, the original seven GPT names, and live GPT, Claude, Gemini, and CodeBuddy replies. The scheduled workflow runs the same check every six hours. Live checks consume subscription quota; `npm test` uses temporary data and simulated HTTP replies.
 
-After login, verify the
-actual account's model catalog and run a real model call, for example:
+## Renew account authorization
+
+Use the gateway's private management API through SSH forwarding. Forward main port 8317 and callback ports 1455 (Codex), 54545 (Claude), and 51121 (Antigravity). Use a system browser: the Google consent screen can stall in an embedded browser. Callback listeners redirect to the main port, so forwarding only callback ports or an alternate management port is insufficient.
+
+Create a fresh login with the management key via these private endpoints:
+
+| Account | Authentication URL endpoint |
+| --- | --- |
+| ChatGPT/Codex | `/v0/management/codex-auth-url?is_webui=true` |
+| Claude | `/v0/management/anthropic-auth-url?is_webui=true` |
+| Antigravity | `/v0/management/antigravity-auth-url?is_webui=true` |
+| CodeBuddy/WorkBuddy | `/v0/management/workbuddy-auth-url` |
+
+The response contains a short-lived URL and state. Complete login with the intended account, then check `/v0/management/get-auth-status?state=<state>` privately. Keep `auths/` mode 700 and credential files mode 600. Never place management keys, browser passwords, or OAuth tokens in GitHub issues or logs. An expired session needs a new URL; successfully saved account credentials do not need to be authorized again.
+
+After login, query the actual catalog and verify a model:
 
 ```bash
-python3 scripts/cli-proxy-smoke.py \
-  --expect-model '<model-id-from-catalog>' \
-  --infer-model '<model-id-from-catalog>'
+python3 scripts/cli-proxy-smoke.py --expect-model '<model-id>' --infer-model '<model-id>'
 ```
 
-The community project reads OAuth credentials and calls provider endpoints;
-its name does not mean it launches the official CLI for every API request.
-These credentials stay separate from LiteLLM's existing ChatGPT and Claude Code
-credentials.
+CodeBuddy added ten names, listed in [README](../README.md). Its shared Credits are separate from Tencent TokenHub Token Plan. LiteLLM's old per-key RPM/TPM limits were not transferred; provider quotas apply.
 
-## Public entry options after validation
+## Legacy retirement and recovery
 
-| Entry | Benefit | Work required |
-| --- | --- | --- |
-| CLIProxyAPI directly | One gateway process for the subscription routes; its own key can preserve the current public key value | Revalidate ChatGPT authentication and client compatibility; recreate the current RPM/TPM limits and deployment monitor if still wanted |
-| LiteLLM → CLIProxyAPI | Retains the current GPT route and LiteLLM key controls | Connect the Docker networks, add selected sidecar models to LiteLLM, and keep two gateway processes |
+`scripts/cli-proxy-retire-legacy.py` is a one-time, explicitly invoked operator tool; deployment never invokes it. By default it only checks the current public four-provider API, Node service state, stopped legacy containers, and ownership of the database volume. With `--apply`, it archives the old installation, OAuth credentials, systemd unit, old Caddy backup, and stopped Postgres data under `.retired-proxy/<UTC-timestamp>/legacy.tar.gz` (directory mode 700, archive mode 600).
 
-Direct CLIProxyAPI is the simpler target if its real account logins and model
-calls pass. Reusing a client key and adapting the smoke workflow are small
-changes. The current LiteLLM RPM/TPM key limits do not transfer automatically;
-decide whether to recreate them at the edge. OAuth refresh, model availability,
-and protocol compatibility are the substantive validation gates.
+It compares archived contents and owner/permission metadata with every original file before removing anything, and writes `SHA256SUMS`. It then masks the old Node unit, removes only the legacy containers, named database volume, and empty project network, and removes the archived installation files. Other applications and Docker resources are untouched. The current Caddy configuration, client key, active OAuth state, and CLIProxyAPI container remain in place. A final public four-provider check verifies the result. If cleanup stops partway through, recovery data remains available; inspect the reported state before continuing.
 
-Keep the public LiteLLM route until the selected accounts and model calls have
-passed on the sidecar. Only then update the deployment workflow and public
-routing for the chosen entry.
+For manual recovery:
 
-## Apply the direct cutover
+1. Identify the timestamped recovery folder and run `sudo sha256sum -c SHA256SUMS` there.
+2. Inspect the archive with `sudo tar -tzf legacy.tar.gz`. It contains paths relative to `/`: `opt/unified-proxy/...`, the old systemd unit, and `var/lib/docker/volumes/unified-proxy-litellm_postgres_data/_data/...`.
+3. Check out [the last migration version](https://github.com/blue126/unified-proxy/tree/ef54ad375b8840746fb9203a9bada88c80abfb78) in a separate recovery checkout for the legacy code and runbook. Extract to a private temporary directory first; copy only the required old state. The original client key is archived, but active CLIProxyAPI credentials should remain untouched.
+4. To restore LiteLLM, recreate its named database volume and restore the archived `_data` contents with their numeric owners before starting Postgres. Restore `.env.litellm`, `.litellm/`, `compose.yaml`, and `litellm/`, then start the old Compose project and wait for readiness. Docker image caches may still be available; otherwise pull the historical images.
+5. Only after real calls pass, restore the archived Caddyfile, validate it, and reload Caddy. The current deployment intentionally has no legacy fallback; suspend its automatic deployment or prepare a separately reviewed recovery change before changing markers or public routing.
+6. If restoring the original Node runtime, explicitly unmask its unit before reinstalling the archived unit and reloading systemd. No automatic workflow re-enables it.
 
-The helper first validates the actual Caddy replacement and makes GPT, Claude,
-and Gemini calls on port 8317. Its check mode leaves public routing untouched:
-
-```bash
-sudo python3 scripts/cli-proxy-cutover.py --check --base-url 'https://<your-domain>'
-```
-
-After the updated main deployment workflow has passed, apply it with
-`--workflow-ready` in place of `--check`. The helper saves the prior Caddyfile
-under `.cli-proxy-api/rollback/`, changes the upstream to port 8317 while keeping
-the original domain, blocks public management/callback paths, and runs the same
-live checks through HTTPS with the original key. After those pass, it stops
-LiteLLM and Postgres and disables their container restart policies. It validates
-the public API once more after retirement. Failure restores the prior Caddyfile
-and LiteLLM containers. Private configuration, OAuth state, and the database
-volume are retained for recovery.
-
-The `.cli-proxy-active` marker takes priority in the deployment workflow.
-Scheduled monitoring detects the gateway runtime and tests three authorized
-providers. Add CodeBuddy inference coverage after its account is logged in.
-
-For a later manual rollback, restore the legacy container policies to
-`unless-stopped`, run the original Compose stack with `.env.litellm` and wait for
-readiness, copy `.cli-proxy-api/rollback/Caddyfile.before-cli-proxy` over the
-existing Caddyfile, validate and reload Caddy, then remove `.cli-proxy-active`.
-The client key has the same value in both gateways.
+Archive deletion and retention changes are separate operator decisions; this cleanup retains the verified archive. It must never be committed or uploaded with a PR.

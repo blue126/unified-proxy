@@ -36,35 +36,15 @@ jobs:
             # Clone latest code
             git clone --depth 1 https://github.com/${{ github.repository }}.git "$TMPDIR"
 
-            if [ -f "$INSTALL_DIR/.cli-proxy-active" ]; then
-              cp "$TMPDIR/compose.cli-proxy.yaml" "$INSTALL_DIR/compose.cli-proxy.yaml"
-              mkdir -p "$INSTALL_DIR/scripts"
-              cp "$TMPDIR"/scripts/cli-proxy-*.py "$INSTALL_DIR/scripts/"
-              cd "$INSTALL_DIR"
-              python3 scripts/cli-proxy-install-plugin.py
-              docker compose -f compose.cli-proxy.yaml up -d
-              python3 scripts/cli-proxy-smoke.py
-            elif [ -f "$INSTALL_DIR/.litellm-active" ]; then
-              cp "$TMPDIR/compose.yaml" "$INSTALL_DIR/compose.yaml"
-              mkdir -p "$INSTALL_DIR/litellm" "$INSTALL_DIR/scripts"
-              cp "$TMPDIR/litellm/config.yaml" "$INSTALL_DIR/litellm/config.yaml"
-              cp "$TMPDIR"/scripts/litellm-*.py "$INSTALL_DIR/scripts/"
-              cd "$INSTALL_DIR"
-              docker compose --env-file .env.litellm -f compose.yaml \
-                -p unified-proxy-litellm up -d --wait --wait-timeout 180
-              curl --fail --silent --show-error \
-                http://127.0.0.1:3456/health/readiness >/dev/null
-            else
-              # Keep deploying the Node service until the validated one-time
-              # cutover writes .litellm-active.
-              cp "$TMPDIR/server.js" "$INSTALL_DIR/server.js"
-              cp "$TMPDIR/package.json" "$INSTALL_DIR/package.json"
-              sudo systemctl daemon-reload
-              sudo systemctl restart unified-proxy
-              sleep 2
-              sudo systemctl is-active --quiet unified-proxy \
-                || (sudo journalctl -u unified-proxy -n 30 --no-pager; exit 1)
-            fi
+            test -f "$INSTALL_DIR/.cli-proxy-active" \
+              || { echo 'CLIProxyAPI activation marker is missing.' >&2; exit 1; }
+            cp "$TMPDIR/compose.cli-proxy.yaml" "$INSTALL_DIR/compose.cli-proxy.yaml"
+            mkdir -p "$INSTALL_DIR/scripts"
+            cp "$TMPDIR"/scripts/cli-proxy-*.py "$INSTALL_DIR/scripts/"
+            cd "$INSTALL_DIR"
+            python3 scripts/cli-proxy-install-plugin.py
+            docker compose -f compose.cli-proxy.yaml up -d
+            python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2
 
       - name: Smoke test
         env:
