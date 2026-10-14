@@ -1,0 +1,11 @@
+[Unit]
+Description=Check CodeBuddy OAuth expiry every five minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Unit=unified-proxy-workbuddy-refresh.service
+
+[Install]
+WantedBy=timers.target

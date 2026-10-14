@@ -22,4 +22,4 @@ jobs:
           docker compose -f compose.cli-proxy.yaml config --quiet
           python3 -m compileall -q scripts/cli-proxy-*.py
       - name: Validate runtime smoke dispatch
-        run: bash -n scripts/smoke.sh
+        run: bash -n scripts/smoke.sh scripts/cli-proxy-install-refresh.sh

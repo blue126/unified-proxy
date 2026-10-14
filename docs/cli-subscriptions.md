@@ -16,7 +16,24 @@ python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2
 
 On a new installation the initializer generates a client key and a distinct management key. Configure clients and the GitHub `PROXY_API_KEY` secret to match the private `upstream-key`; the current deployment already has a matching key and must retain it. Caddy must already route the existing HTTPS domain to localhost:8317, block `/v0/*`, `/v8/*`, `/management.html`, and OAuth callback paths, and map `/health/readiness` and `/health` to `/`. The deployment workflow requires `.cli-proxy-active` and never falls back to a retired service. It updates the Compose file and helpers, checks the pinned plugin, reconciles the gateway, and checks the public API.
 
-Run `npm run smoke` from a checkout with its ignored `.env.secrets`, or provide `BASE_URL` and `PROXY_API_KEY` in the environment. The public check verifies authenticated models, anonymous-request rejection, blocked management routes, the original seven GPT names, and live GPT, Claude, Gemini, and CodeBuddy replies. The scheduled workflow runs the same check every six hours. Live checks consume subscription quota; `npm test` uses temporary data and simulated HTTP replies.
+Run `npm run smoke` from a checkout with its ignored `.env.secrets`, or provide `BASE_URL` and `PROXY_API_KEY` in the environment. The public check verifies authenticated models, anonymous-request rejection, blocked management routes, the original seven GPT names, and live GPT, Claude, Gemini, and CodeBuddy replies. The scheduled workflow runs these checks every six hours and checks WorkBuddy refresh timer health over SSH. Live checks consume subscription quota; `npm test` uses temporary data and simulated HTTP replies.
+
+## Automatic token refresh
+
+CLIProxyAPI's built-in worker handles ChatGPT, Claude, and Antigravity. WorkBuddy v0.3.2 implements token refresh but does not expose expiry/refresh scheduling metadata to that worker. The supplemental `unified-proxy-workbuddy-refresh.timer` invokes `scripts/cli-proxy-refresh-workbuddy.py` every five minutes as the installation owner (`ubuntu`, matching the gateway's UID). It checks the nested OAuth expiry and, within ten minutes of expiry, selects only that credential at the loopback `/v0/management/auth-files/refresh` endpoint. It skips disabled accounts, API keys, and other providers.
+
+The script reads the management key privately, disables environment HTTP proxies and redirects, serializes its invocations, and delegates exchange and atomic persistence to CLIProxyAPI. It verifies that the saved expiry extended and remains valid. It does not directly exchange upstream refresh tokens, rewrite OAuth files, or print tokens/account identifiers. If refreshing fails, the systemd job fails and the timer retries at its next interval; the existing six-hour monitor detects the failed job or expired credential. Revoked refresh tokens require a new login.
+
+Deployment copies the units and installs them with `bash scripts/cli-proxy-install-refresh.sh`. To inspect without rotating any token:
+
+```bash
+python3 scripts/cli-proxy-refresh-workbuddy.py --check --check-timer
+systemctl status unified-proxy-workbuddy-refresh.timer
+```
+
+For an explicitly requested one-off refresh verification, use `--force` instead of `--check`. The real refresh, persisted expiry extension, automatic timer invocation, and subsequent public calls were verified during rollout. The timer uses a 120-second job timeout and an API request timeout of 90 seconds for the current single account. A larger account pool needs a proportionally longer service timeout.
+
+To suspend this supplemental job, run `sudo systemctl disable --now unified-proxy-workbuddy-refresh.timer` and stop its service if it is running. Saved tokens and client keys remain in place. Re-enable with the installer after resolving the cause.
 
 ## Renew account authorization
 

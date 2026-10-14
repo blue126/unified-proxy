@@ -41,10 +41,15 @@ jobs:
             cp "$TMPDIR/compose.cli-proxy.yaml" "$INSTALL_DIR/compose.cli-proxy.yaml"
             mkdir -p "$INSTALL_DIR/scripts"
             cp "$TMPDIR"/scripts/cli-proxy-*.py "$INSTALL_DIR/scripts/"
+            cp "$TMPDIR/scripts/cli-proxy-install-refresh.sh" "$INSTALL_DIR/scripts/"
+            mkdir -p "$INSTALL_DIR/systemd"
+            cp "$TMPDIR"/systemd/unified-proxy-workbuddy-refresh.* "$INSTALL_DIR/systemd/"
             cd "$INSTALL_DIR"
             python3 scripts/cli-proxy-install-plugin.py
             docker compose -f compose.cli-proxy.yaml up -d
             python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2
+            bash scripts/cli-proxy-install-refresh.sh
+            python3 scripts/cli-proxy-refresh-workbuddy.py --check --check-timer
 
       - name: Smoke test
         env:
