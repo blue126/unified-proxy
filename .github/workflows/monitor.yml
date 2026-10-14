@@ -14,6 +14,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: WorkBuddy refresh timer health
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.OCI_HOST }}
+          username: ${{ secrets.OCI_USER }}
+          key: ${{ secrets.OCI_SSH_KEY }}
+          script: |
+            set -e
+            python3 /opt/unified-proxy/scripts/cli-proxy-refresh-workbuddy.py --check --check-timer
+
       - name: Provider health + live inference
         env:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}

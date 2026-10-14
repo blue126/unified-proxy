@@ -1,0 +1,23 @@
+[Unit]
+Description=Refresh CodeBuddy OAuth credentials through CLIProxyAPI
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/unified-proxy
+ExecStart=/usr/bin/python3 /opt/unified-proxy/scripts/cli-proxy-refresh-workbuddy.py
+TimeoutStartSec=120
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/unified-proxy/.cli-proxy-api
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
