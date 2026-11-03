@@ -98,7 +98,7 @@ Merging to `main` runs [the deploy workflow](.github/workflows/deploy.yml); docs
 
 Like the monitor, a deploy succeeds while at least one provider works; broken providers are warnings. It fails only if the gateway is unreachable, every provider fails, or a deploy-owned step fails (plugin hash, Compose, timer install). Never push directly to `main`; open a PR, and see [AGENTS.md](AGENTS.md) for the branch workflow.
 
-Versions are pinned: CLIProxyAPI v8.0.27 by image digest in [`compose.cli-proxy.yaml`](compose.cli-proxy.yaml), WorkBuddy v0.3.2 by archive and binary SHA-256 in [`scripts/cli-proxy-install-plugin.py`](scripts/cli-proxy-install-plugin.py). An upgrade is a PR that changes the pin.
+Versions are pinned: CLIProxyAPI v8.0.52 by image digest in [`compose.cli-proxy.yaml`](compose.cli-proxy.yaml), WorkBuddy v0.3.2 by archive and binary SHA-256 in [`scripts/cli-proxy-install-plugin.py`](scripts/cli-proxy-install-plugin.py). An upgrade is a PR that changes the pin.
 
 ## Troubleshooting
 

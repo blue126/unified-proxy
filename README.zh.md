@@ -83,7 +83,7 @@ WorkBuddy 刷新定时任务失败算作 CodeBuddy 故障。告警不记录状�
 
 与监控一致：只要还有一个 provider 可用，部署就成功，失败的 provider 只记 warning。只有网关不可用、全部 provider 失败或部署自身步骤失败（插件校验、Compose、定时任务安装）才算失败。不要直接推送 `main`，流程见 [AGENTS.md](AGENTS.md)。
 
-版本固定：CLIProxyAPI v8.0.27（镜像 digest，见 `compose.cli-proxy.yaml`），WorkBuddy v0.3.2（SHA-256，见 `scripts/cli-proxy-install-plugin.py`）。升级即修改固定版本的 PR。
+版本固定：CLIProxyAPI v8.0.52（镜像 digest，见 `compose.cli-proxy.yaml`），WorkBuddy v0.3.2（SHA-256，见 `scripts/cli-proxy-install-plugin.py`）。升级即修改固定版本的 PR。
 
 ## 故障排查
 

@@ -3,8 +3,8 @@ name: unified-proxy-cli
 
 services:
   cli-proxy-api:
-    # CLIProxyAPI v8.0.27, linux/arm64. Pin the published image digest.
-    image: eceasy/cli-proxy-api@sha256:b7cf456bf6ef7f6489f18144e7cc166dbb8b2e5f46d6ee8881a321aaea563730
+    # CLIProxyAPI v8.0.52 (runs as linux/arm64). Pinned to the published multi-arch index digest.
+    image: eceasy/cli-proxy-api@sha256:5d5bab318ac048c0f88570c6ffb852ef3e42e9acc9bfcf346c524de7a2468131
     command: ["./CLIProxyAPI", "--config", "/CLIProxyAPI/config.yaml"]
     user: "${CLI_PROXY_UID:-1001}:${CLI_PROXY_GID:-1001}"
     init: true

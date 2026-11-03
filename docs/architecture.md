@@ -15,7 +15,7 @@ flowchart LR
     subgraph VM["OCI ARM64 VM: /opt/unified-proxy"]
         Caddy[Caddy<br/>HTTPS, route filter]
         subgraph Container["cli-proxy-api container (read-only rootfs)"]
-            CPA[CLIProxyAPI v8.0.27<br/>:8317 API + management]
+            CPA[CLIProxyAPI v8.0.52<br/>:8317 API + management]
             WB[WorkBuddy plugin v0.3.2]
             CB[OAuth callback listeners<br/>:1455 :54545 :51121]
         end
