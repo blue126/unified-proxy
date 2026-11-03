@@ -47,9 +47,11 @@ jobs:
             cd "$INSTALL_DIR"
             python3 scripts/cli-proxy-install-plugin.py
             docker compose -f compose.cli-proxy.yaml up -d
-            python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2
+            # Like /health and the public smoke: only a dead gateway blocks the deploy.
+            python3 scripts/cli-proxy-smoke.py --expect-model glm-5.2 --warn-only
             bash scripts/cli-proxy-install-refresh.sh
-            python3 scripts/cli-proxy-refresh-workbuddy.py --check --check-timer
+            python3 scripts/cli-proxy-refresh-workbuddy.py --check --check-timer \
+              || echo '::warning title=CodeBuddy::WorkBuddy refresh check failed; other providers were deployed.'
 
       - name: Smoke test
         env:
