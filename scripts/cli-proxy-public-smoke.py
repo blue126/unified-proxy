@@ -124,13 +124,11 @@ def main() -> int:
         ids = set()
     else:
         missing = {name: sorted(models - ids) for name, (models, _) in PROVIDERS.items() if models - ids}
-        if missing and not args.monitor:
-            gateway_error = "Expected subscription model is absent: " + ", ".join(sum(missing.values(), []))
-        for name, (_, check) in PROVIDERS.items():
-            if gateway_error:
-                break
+        for name in missing:
+            results[name] = {"ok": False, "reason": "model absent: " + ", ".join(missing[name])}
+        # Strict mode fails on a missing model before spending any inference.
+        for name, (_, check) in PROVIDERS.items() if args.monitor or not missing else ():
             if name in missing:
-                results[name] = {"ok": False, "reason": "model absent: " + ", ".join(missing[name])}
                 continue
             try:
                 check(base, key)
@@ -155,8 +153,10 @@ def main() -> int:
         print("Providers OK: " + (", ".join(n for n in results if n not in failed) or "none"))
         return 1 if len(failed) == len(results) else 0
 
-    if failed:
-        raise SystemExit(f"CLIProxyAPI smoke failed ({results[failed[0]]['reason']}).")
+    checked = [name for name in failed if results[name]["reason"] != "not checked"]
+    if checked:
+        raise SystemExit("CLIProxyAPI smoke failed ("
+                         + "; ".join(f"{name}: {results[name]['reason']}" for name in checked) + ").")
     print("CLIProxyAPI client authentication, original GPT names, GPT Responses, Claude, Gemini, and CodeBuddy passed.")
     return 0
 

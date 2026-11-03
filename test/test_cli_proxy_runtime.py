@@ -136,22 +136,14 @@ class MonitorNotifyTests(unittest.TestCase):
         self.module = load('monitor-notify')
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
-        self.calls = []
         self.pushes = []
-        self.existing = None
 
     def run_with(self, providers, timer='success'):
         import json
         path = Path(self.directory.name) / 'r.json'
         path.write_text(json.dumps({'gateway_error': '', 'providers': providers}))
-
-        def gh(*args):
-            self.calls.append(args)
-            return json.dumps([self.existing] if self.existing else [])
-
-        with patch.object(self.module, 'gh', side_effect=gh), \
-                patch.object(self.module, 'bark', side_effect=lambda t, b: self.pushes.append((t, b))), \
-                patch.dict(os.environ, {'TIMER_OUTCOME': timer, 'GITHUB_RUN_ID': '1'}, clear=True), \
+        with patch.object(self.module, 'bark', side_effect=lambda *push: self.pushes.append(push)), \
+                patch.dict(os.environ, {'TIMER_OUTCOME': timer}, clear=True), \
                 patch('sys.argv', ['notify', str(path)]), contextlib.redirect_stdout(io.StringIO()):
             return self.module.main()
 
@@ -159,32 +151,28 @@ class MonitorNotifyTests(unittest.TestCase):
     def status(**flags):
         return {n: {'ok': ok, 'reason': '' if ok else 'HTTP 403'} for n, ok in flags.items()}
 
-    def test_partial_failure_opens_issue_without_push(self):
+    def test_partial_failure_pushes_normal_alert_naming_provider(self):
         self.run_with(self.status(gpt=True, claude=False, gemini=True, codebuddy=True))
-        self.assertEqual(self.pushes, [])
-        create = [c for c in self.calls if c[:2] == ('issue', 'create')]
-        self.assertEqual(len(create), 1)
-        self.assertIn('**claude**: HTTP 403', create[0][-1])
+        self.assertEqual(self.pushes, [('Provider down: claude', 'claude: HTTP 403', 'active')])
 
-    def test_all_failing_pushes_to_phone(self):
+    def test_all_failing_pushes_time_sensitive_alert(self):
         self.run_with(self.status(gpt=False, claude=False, gemini=False, codebuddy=False))
         self.assertEqual(len(self.pushes), 1)
-        self.assertIn('claude: HTTP 403', self.pushes[0][1])
+        self.assertEqual(self.pushes[0][0], 'All providers down')
+        self.assertEqual(self.pushes[0][2], 'timeSensitive')
 
-    def test_unchanged_alert_is_not_repeated(self):
-        self.existing = {'number': 7, 'body': 'x <!-- failed:claude -->'}
-        self.run_with(self.status(gpt=True, claude=False))
-        self.assertEqual([c for c in self.calls if c[0] == 'issue' and c[1] != 'list'], [])
-
-    def test_recovery_closes_issue(self):
-        self.existing = {'number': 7, 'body': '<!-- failed:claude -->'}
+    def test_healthy_sends_nothing(self):
         self.run_with(self.status(gpt=True, claude=True))
-        self.assertTrue(any(c[:3] == ('issue', 'close', '7') for c in self.calls))
+        self.assertEqual(self.pushes, [])
 
     def test_timer_failure_counts_against_codebuddy(self):
         self.run_with(self.status(gpt=True, codebuddy=True), timer='failure')
-        create = [c for c in self.calls if c[:2] == ('issue', 'create')]
-        self.assertIn('**codebuddy**: WorkBuddy refresh timer check failed', create[0][-1])
+        self.assertIn('codebuddy: WorkBuddy refresh timer check failed', self.pushes[0][1])
+
+    def test_missing_bark_key_only_warns(self):
+        with patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.module.bark('t', 'b', 'active')
+        self.assertIn('BARK_KEY is unset', out.getvalue())
 
 
 class PrivateInitializationTests(unittest.TestCase):
