@@ -175,6 +175,48 @@ class MonitorNotifyTests(unittest.TestCase):
         self.assertIn('BARK_KEY is unset', out.getvalue())
 
 
+class DeploySmokeTests(unittest.TestCase):
+    def setUp(self):
+        self.module = load('cli-proxy-smoke')
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        private = Path(self.directory.name) / '.cli-proxy-api'
+        private.mkdir()
+        for name in ('upstream-key', 'management-key'):
+            (private / name).write_text('test-only')
+        self.plugins = {'plugins': [{'id': 'workbuddy', 'enabled': True, 'registered': True}]}
+        self.models = ['glm-5.2']
+
+    def request(self, base, path, key, payload=None):
+        if path == '/v0/management/plugins':
+            return self.plugins
+        return {'data': [{'id': model} for model in self.models]}
+
+    def invoke(self, *extra):
+        argv = ['smoke', '--root', self.directory.name, '--expect-model', 'glm-5.2', *extra]
+        with patch.object(self.module, 'request', side_effect=self.request), \
+                patch('sys.argv', argv), contextlib.redirect_stdout(io.StringIO()) as out:
+            self.module.main()
+        return out.getvalue()
+
+    def test_missing_plugin_and_model_fail_by_default(self):
+        self.plugins = {'plugins': []}
+        with self.assertRaises(SystemExit):
+            self.invoke()
+
+    def test_warn_only_reports_provider_problems_without_failing(self):
+        self.plugins = {'plugins': []}
+        self.models = []
+        out = self.invoke('--warn-only')
+        self.assertIn('::warning title=Provider check::WorkBuddy plugin is not loaded', out)
+        self.assertIn('::warning title=Provider check::Expected model is absent: glm-5.2', out)
+
+    def test_unreachable_gateway_still_fails_with_warn_only(self):
+        with patch.object(self.module, 'await_plugins', side_effect=OSError('down')):
+            with self.assertRaises(SystemExit):
+                self.invoke('--warn-only')
+
+
 class PrivateInitializationTests(unittest.TestCase):
     def setUp(self):
         self.module = load('cli-proxy-init')
