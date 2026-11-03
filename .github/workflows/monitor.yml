@@ -1,8 +1,8 @@
 name: Monitor deployed proxy
 
 # CLIProxyAPI verifies GPT, Claude, Gemini, and CodeBuddy live calls.
-# Providers are checked independently: some failing -> warning + GitHub issue (email);
-# all failing -> error + issue + Bark push.
+# Providers are checked independently: some failing -> warning + Bark push;
+# all failing -> error + time-sensitive Bark push.
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   monitor:
@@ -41,8 +40,8 @@ jobs:
       - name: Alert on provider failures
         if: always()
         env:
-          GH_TOKEN: ${{ github.token }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TIMER_OUTCOME: ${{ steps.timer.outcome }}
         run: |
           if [ -f "$RUNNER_TEMP/provider-results.json" ]; then
