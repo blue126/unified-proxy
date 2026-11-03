@@ -119,6 +119,7 @@ The gateway is useful while any provider works, so every automated check treats 
 | `scripts/cli-proxy-refresh-workbuddy.py`, `scripts/cli-proxy-install-refresh.sh`, `systemd/` | WorkBuddy refresh timer |
 | `scripts/reauth.py` | Local re-authentication and credential status for all providers |
 | `scripts/cli-proxy-claude-auth.py` | Server-side Claude login used by the maintenance workflow |
+| `scripts/build-claude-shortcut.py` | Generates the iPhone shortcut that drives the maintenance workflow |
 | `scripts/push-secrets.sh` | Sync `.env.secrets` to GitHub secrets |
 | `scripts/cli-proxy-retire-legacy.py` | One-time retirement of the old Node/LiteLLM stack |
 | `test/` | Unit tests, no network |

@@ -69,7 +69,7 @@ For Claude only, `server-maintenance.yml` can run the login from a phone. It use
 2. Open it in a browser, sign in with the Claude subscription account, and approve. The browser then fails to load a `localhost:54545` page; that is expected. Copy the full address-bar URL (or the `code#state` text if one is shown).
 3. Run the workflow again with operation `claude-login-complete` and that value as `callback`. It is masked in the logs. The run ends with a live Claude inference check.
 
-`diagnose` lists the stored Claude credential's status. The login URL is visible in the run log, and this repository is public; it is useless without your Claude account approval, and the callback is masked, but start a new login if a step fails midway. `scripts/cli-proxy-claude-auth.py` uses the v0 management endpoints `anthropic-auth-url`, `oauth-callback`, and `get-auth-status`; if a CLIProxyAPI upgrade changes them, fall back to the manual steps above.
+The [iPhone shortcut](claude-iphone-shortcut.md) runs the same two steps from the Shortcuts app. `diagnose` lists the stored Claude credential's status. The login URL is visible in the run log, and this repository is public; it is useless without your Claude account approval, and the callback is masked, but start a new login if a step fails midway. `scripts/cli-proxy-claude-auth.py` uses the v0 management endpoints `anthropic-auth-url`, `oauth-callback`, and `get-auth-status`; if a CLIProxyAPI upgrade changes them, fall back to the manual steps above.
 
 After login, query the actual catalog and verify a model:
 

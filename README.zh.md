@@ -11,7 +11,7 @@
 | 服务是否正常？ | 看 Bark 推送，或 **Actions → Monitor deployed proxy → Run workflow** |
 | 查看已存凭据 | `./scripts/reauth.py status` |
 | 重新认证（Mac） | `./scripts/reauth.py claude`（或 `codex`、`antigravity`、`workbuddy`） |
-| 重新认证 Claude（手机） | **Actions → Server maintenance**，先 `claude-login-start` 再 `claude-login-complete` |
+| 重新认证 Claude（手机） | [iPhone 快捷指令](docs/claude-iphone-shortcut.md)，或 **Actions → Server maintenance**，先 `claude-login-start` 再 `claude-login-complete` |
 | 端到端真实检查 | `npm run smoke`（消耗额度） |
 | 部署 | 把审核过的 PR 合并到 `main` |
 | 同步 secrets 到 GitHub | `./scripts/push-secrets.sh` |
