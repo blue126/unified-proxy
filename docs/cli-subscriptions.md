@@ -50,6 +50,17 @@ Create a fresh login with the management key via these private endpoints:
 
 The response contains a short-lived URL and state. Complete login with the intended account, then check `/v0/management/get-auth-status?state=<state>` privately. Keep `auths/` mode 700 and credential files mode 600. Never place management keys, browser passwords, or OAuth tokens in GitHub issues or logs. An expired session needs a new URL; successfully saved account credentials do not need to be authorized again.
 
+### From this Mac: `scripts/reauth.py` (all providers)
+
+From a checkout with `.env.secrets`, run one of:
+
+```bash
+./scripts/reauth.py claude        # or codex, antigravity, workbuddy
+./scripts/reauth.py status        # stored credentials and their status
+```
+
+It opens an SSH tunnel for port 8317 and that provider's callback port, reads the management key over SSH into memory only, opens the login page in the system browser, and waits until CLIProxyAPI saves the credential. The browser callback reaches the server through the tunnel, so nothing needs pasting; if you approved on another device, paste the final address-bar URL at the prompt. WorkBuddy uses a QR/browser login without a callback. Each login ends with a live inference check for that provider. Local ports 8317 and the callback port must be free.
+
 ### Claude from the Actions tab (no SSH forwarding)
 
 For Claude only, `server-maintenance.yml` can run the login from a phone. It uses `SSH` to reach the server's management API, so it needs the existing `OCI_*` secrets and runs only from `main`.

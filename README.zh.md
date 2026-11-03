@@ -28,9 +28,22 @@
 - 推送可点开对应运行日志。不记录状态，故障期间每次运行都会再推送一次。
 - 需要 GitHub secret `BARK_KEY`（Bark App 首页 `https://api.day.app/<key>/` 中的 key）。在 `.env.secrets` 中填写后运行 `./scripts/push-secrets.sh` 同步。
 
-## Claude 重新认证
+## 重新认证
 
-无需 SSH 转发，可在手机上完成：
+### 在本机（Mac）上：支持全部 provider
+
+在带有 `.env.secrets` 的 checkout 中运行：
+
+```bash
+./scripts/reauth.py claude        # 或 codex、antigravity、workbuddy
+./scripts/reauth.py status        # 查看已保存凭据及其状态
+```
+
+脚本会建立 SSH 隧道（8317 及该 provider 的回调端口），通过 SSH 把管理密钥只读入内存，用系统浏览器打开登录页，等待 CLIProxyAPI 保存凭据，最后对该 provider 做一次真实调用验证。浏览器回调经隧道直达服务器，无需粘贴；若在其他设备上授权，按提示粘贴最终地址栏 URL 即可。WorkBuddy 为扫码/浏览器登录，没有回调。需要本机 8317 和回调端口空闲。
+
+### Claude：在手机上通过 Actions
+
+无需 SSH 转发：
 
 1. **Actions → Server maintenance → Run workflow**，选择 `claude-login-start`，日志中会打印登录链接。
 2. 打开链接，用 Claude 订阅账号登录并授权。浏览器随后无法打开 `localhost:54545` 页面，属正常现象；复制地址栏中的完整地址（若页面显示 `code#state` 则复制它）。

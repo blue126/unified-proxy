@@ -6,7 +6,8 @@
   "scripts": {
     "start": "docker compose -f compose.cli-proxy.yaml up -d",
     "test": "python3 -m unittest discover -s test -p 'test_cli_proxy_*.py'",
-    "smoke": "./scripts/smoke.sh"
+    "smoke": "./scripts/smoke.sh",
+    "reauth": "./scripts/reauth.py"
   },
   "keywords": [
     "claude",
