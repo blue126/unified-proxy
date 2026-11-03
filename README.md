@@ -1,40 +1,116 @@
 # Unified Proxy
 
-The gateway runs [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) behind Caddy on the existing HTTPS domain. It forwards requests through separately authorized ChatGPT, Claude, and Google Antigravity accounts. The WorkBuddy plugin is authorized with the CodeBuddy/WorkBuddy shared-Credits account. The client API key and the existing seven GPT model IDs are preserved from the LiteLLM deployment.
+One OpenAI- and Anthropic-compatible HTTPS endpoint backed by subscription accounts: ChatGPT/Codex, Claude, Google Antigravity (Gemini), and CodeBuddy/WorkBuddy. It runs [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) behind Caddy on an OCI ARM64 VM. Clients use a single API key; the gateway holds the provider OAuth credentials.
+
+This README is the operator guide. For how the pieces fit together, see [architecture](docs/architecture.md); for installation, recovery, and legacy retirement, see [operations and recovery](docs/cli-subscriptions.md). 中文版见 [README.zh.md](README.zh.md).
+
+## Quick reference
+
+| Task | How |
+| --- | --- |
+| Is everything up? | Bark alerts, or **Actions → Monitor deployed proxy → Run workflow** |
+| Check stored credentials | `./scripts/reauth.py status` |
+| Re-authenticate a provider (Mac) | `./scripts/reauth.py claude` (or `codex`, `antigravity`, `workbuddy`) |
+| Re-authenticate Claude (phone) | **Actions → Server maintenance**, `claude-login-start` then `claude-login-complete` |
+| Live end-to-end check | `npm run smoke` (consumes quota) |
+| Deploy | Merge a reviewed PR to `main` |
+| Sync secrets to GitHub | `./scripts/push-secrets.sh` |
+| Unit tests | `npm test` (Python 3.10+, no network) |
 
 ## Connect a client
 
-OpenAI-compatible clients retain `https://<your-domain>/v1` and their existing `PROXY_API_KEY`. Use `Authorization: Bearer <PROXY_API_KEY>`, list models with `GET /v1/models`, and call `POST /v1/chat/completions` or `POST /v1/responses`. The catalog also exposes Claude and Gemini names after those accounts are authorized. Catalog presence does not prove every model is currently served by the account.
+- Base URL: `https://<PROXY_DOMAIN>/v1`
+- Auth: `Authorization: Bearer <PROXY_API_KEY>`
+- Endpoints: `GET /v1/models`, `POST /v1/chat/completions`, `POST /v1/responses`, `POST /v1/messages` (Anthropic format)
 
-| Provider | Tested model | Authentication held by the gateway |
+| Provider | Tested model | Account held by the gateway |
 | --- | --- | --- |
-| GPT / Codex | `gpt-6-luna` | Dedicated ChatGPT OAuth login |
-| Claude | `claude-sonnet-5` | Dedicated Claude OAuth login |
-| Google | `gemini-3-flash` | Dedicated Antigravity OAuth login |
-| CodeBuddy / WorkBuddy | `glm-5.2`, `kimi-k2.7` | Dedicated WorkBuddy plugin OAuth login |
+| GPT / Codex | `gpt-6-luna` | ChatGPT OAuth |
+| Claude | `claude-sonnet-5` | Claude OAuth |
+| Google | `gemini-3-flash` | Antigravity OAuth |
+| CodeBuddy / WorkBuddy | `glm-5.2`, `kimi-k2.7` | WorkBuddy plugin OAuth (shared Credits) |
 
-The seven preserved GPT IDs are `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. GPT Responses JSON and streaming, Claude streaming and function calls, and CodeBuddy GLM streaming were tested. CodeBuddy adds `deepseek-v4-flash`, `deepseek-v4-pro`, `glm-5.1`, `glm-5.2`, `glm-5v-turbo`, `hy3`, `hy3-preview`, `hy3-preview-agent`, `kimi-k2.7`, and `minimax-m3-pay`; GLM and Kimi have passed real calls. The authorized catalog currently lists 50 models.
+The seven GPT IDs kept from earlier deployments are `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`. CodeBuddy adds `deepseek-v4-flash`, `deepseek-v4-pro`, `glm-5.1`, `glm-5.2`, `glm-5v-turbo`, `hy3`, `hy3-preview`, `hy3-preview-agent`, `kimi-k2.7`, and `minimax-m3-pay`. The catalog lists about 50 models; being listed does not prove the account can serve a model, so test before relying on one.
 
-Claude-compatible clients can call `POST /v1/messages` using the gateway key. For a new Claude Code client configuration:
+Claude Code:
 
 ```bash
-export ANTHROPIC_BASE_URL="https://<your-domain>"
+export ANTHROPIC_BASE_URL="https://<PROXY_DOMAIN>"
 export ANTHROPIC_AUTH_TOKEN="<PROXY_API_KEY>"
 claude
 ```
 
-The community bridge calls provider endpoints using stored OAuth credentials; it does not launch the official CLI for every request. See the provider terms before using subscription authentication in another application.
+There are no per-key rate limits; each provider account's own quota applies. The gateway calls provider endpoints with stored OAuth credentials and does not launch the official CLIs. Check the provider terms before using subscription authentication this way.
 
-## Operate the gateway
+## Configuration
 
-`compose.cli-proxy.yaml` pins CLIProxyAPI v8.0.27 by image digest and binds its API and OAuth callback ports to server localhost. `scripts/cli-proxy-install-plugin.py` installs WorkBuddy v0.3.2 only after verifying both archive and binary SHA-256 hashes. Caddy forwards public client requests to localhost port 8317, blocks management and OAuth callback routes, and maps `/health/readiness` and `/health` to the gateway's process-level response.
+This is a public repository: never commit secret values, the real domain, or the host.
 
-Private state lives in `/opt/unified-proxy/.cli-proxy-api/`: `config.yaml` holds gateway settings, `upstream-key` mirrors its client key, `management-key` is separate, and `auths/` holds refreshable OAuth credentials. Keep the directory at mode 700 and credential files at mode 600. The local ignored `.env.secrets` and GitHub Actions `PROXY_API_KEY` retain the same client key. Never commit or log these values or the real host/domain.
+**Local `.env.secrets`** (ignored; copy `.env.secrets.example`). Used by `npm run smoke`, `./scripts/reauth.py`, and `./scripts/push-secrets.sh`.
 
-The current public key permits the registered subscription models. LiteLLM's former per-key 120 RPM and 1,000,000 TPM limits do not carry over; provider account quotas still apply. No separately billed Anthropic API key is configured.
+| Variable | Meaning |
+| --- | --- |
+| `OCI_HOST` | Public IP or hostname of the VM |
+| `OCI_USER` | SSH user (`ubuntu`) |
+| `OCI_SSH_KEY_FILE` | Path to the SSH private key; its contents are uploaded as `OCI_SSH_KEY` |
+| `PROXY_DOMAIN` | Public domain, without scheme |
+| `PROXY_API_KEY` | Client API key |
+| `BARK_KEY` | Bark device key for monitor alerts (optional; no pushes without it) |
 
-ChatGPT, Claude, and Antigravity use CLIProxyAPI's built-in OAuth refresh. WorkBuddy v0.3.2 has a refresh handler but does not supply the host's automatic scheduling metadata. A local systemd timer therefore checks WorkBuddy expiry every five minutes and calls the private management refresh API within ten minutes of expiry. CLIProxyAPI exchanges and persists rotated tokens; the timer checks that the saved expiry was extended. Revoked or invalid refresh credentials still require a new login. Client API keys do not rotate with upstream tokens.
+**GitHub Actions secrets**, synced with `./scripts/push-secrets.sh`: `OCI_HOST`, `OCI_USER`, `OCI_SSH_KEY`, `PROXY_DOMAIN`, `PROXY_API_KEY`, `BARK_KEY`. `OCI_SSH_FINGERPRINT` is optional, set by hand, and pins the host key for the maintenance workflow.
 
-Pushing reviewed code to `main` runs [the deploy workflow](.github/workflows/deploy.yml). The server must have its `.cli-proxy-active` marker; missing activation fails deployment without starting a legacy service. Otherwise, the workflow preserves private account state, verifies the pinned plugin, reconciles Compose, installs/checks the WorkBuddy refresh timer, and checks the public API. Only a dead gateway or a full outage fails a deploy; a single broken provider (including the WorkBuddy plugin, catalog, or refresh timer) is a warning. [The monitor workflow](.github/workflows/monitor.yml) runs every six hours and checks the timer, latest job result, recent execution, and token validity as well as client authentication, GPT model names, and real GPT, Claude, Gemini, and CodeBuddy replies. Providers are checked independently: when some fail, the log shows a warning per provider and a Bark push names them; when all fail, the workflow errors and sends a time-sensitive Bark push (`BARK_KEY` secret). Each failing run pushes again. Run the API checks with `npm run smoke`; it and the deploy smoke step pass while at least one provider works, warning for each failing one; live checks consume subscription quota. `npm test` runs side-effect-free Python unit tests; Python 3.10 or later is required.
+**Server private state** in `/opt/unified-proxy/.cli-proxy-api/` (directory mode 700, files 600): `config.yaml` (gateway settings), `upstream-key` (the client key), `management-key` (private management API; leaves the server only into a tool's memory), `auths/` (provider OAuth credentials), `plugins/`.
 
-The old Node service is masked. LiteLLM/Postgres containers, their database volume, and the old installation files have been removed after verifying a private recovery archive under `/opt/unified-proxy/.retired-proxy/`. Caddy, active OAuth state, the public endpoint, and the current client key are preserved. Legacy runtime code and key-rotation tools are removed from this branch; re-authenticate any provider from a Mac with `./scripts/reauth.py <provider>` ([details](docs/cli-subscriptions.md#from-this-mac-scriptsreauthpy-all-providers)), or Claude from a phone through the [Server maintenance workflow](docs/cli-subscriptions.md#claude-from-the-actions-tab-no-ssh-forwarding); [the previous version](https://github.com/blue126/unified-proxy/tree/ef54ad375b8840746fb9203a9bada88c80abfb78) retains their history. See [operations and recovery](docs/cli-subscriptions.md).
+`PROXY_API_KEY` must be the same in `.env.secrets`, the GitHub secret, and the server's `upstream-key`. Client keys do not change when provider tokens refresh.
+
+## Monitoring and alerts
+
+[The monitor workflow](.github/workflows/monitor.yml) runs every six hours. It checks the WorkBuddy refresh timer over SSH, then client authentication, blocked management routes, the catalog, and a real reply from each provider. Providers are checked independently and each failure is named with its reason, for example `claude: model absent: claude-sonnet-5` or `gemini: HTTP 403: …`.
+
+| Result | Log | Workflow | Bark push |
+| --- | --- | --- | --- |
+| All providers OK | `Providers OK: …` | passes | none |
+| Some providers fail | one warning per provider | passes | normal, titled `Provider down: <names>` |
+| All fail, or the gateway is down | errors | fails | time-sensitive, `All providers down` |
+
+A failed WorkBuddy refresh timer counts as a CodeBuddy failure. Alerts keep no state: every failing run pushes again, and recovery sends nothing. Each push links to its run.
+
+Public `/health` is the gateway's process-level response only and does not report providers. Use the monitor, `npm run smoke`, or `./scripts/reauth.py status` for that.
+
+## Re-authenticate an account
+
+Needed when a provider's refresh token is revoked or expired: the monitor reports `model absent` or an auth error for that provider, and `status` shows it as `error`.
+
+**From a Mac** (all providers), in a checkout with `.env.secrets`:
+
+```bash
+./scripts/reauth.py status
+./scripts/reauth.py claude
+```
+
+The script tunnels the private management API and the provider's callback port over SSH, opens the login page in your browser, waits for CLIProxyAPI to save the credential, and ends with a live call for that provider. If you approve on another device, paste the final address-bar URL when prompted. Local port 8317 and the callback port (Codex 1455, Claude 54545, Antigravity 51121) must be free. Signing in with a different account adds a new credential; delete the old one later if it is no longer wanted.
+
+**Claude from a phone**: run **Actions → Server maintenance** with `claude-login-start`, open the logged URL and approve, copy the failed `localhost:54545` address, then run `claude-login-complete` with it as `callback`. Details: [operations](docs/cli-subscriptions.md#claude-from-the-actions-tab-no-ssh-forwarding).
+
+## Deploy
+
+Merging to `main` runs [the deploy workflow](.github/workflows/deploy.yml); docs-only changes are skipped. It copies the Compose file, helpers, and systemd units to the server, verifies the pinned WorkBuddy plugin, reconciles the container, installs the WorkBuddy refresh timer, and runs the public smoke check. The server must have its `.cli-proxy-active` marker. Account state and keys are never overwritten.
+
+Like the monitor, a deploy succeeds while at least one provider works; broken providers are warnings. It fails only if the gateway is unreachable, every provider fails, or a deploy-owned step fails (plugin hash, Compose, timer install). Never push directly to `main`; open a PR, and see [AGENTS.md](AGENTS.md) for the branch workflow.
+
+Versions are pinned: CLIProxyAPI v8.0.27 by image digest in [`compose.cli-proxy.yaml`](compose.cli-proxy.yaml), WorkBuddy v0.3.2 by archive and binary SHA-256 in [`scripts/cli-proxy-install-plugin.py`](scripts/cli-proxy-install-plugin.py). An upgrade is a PR that changes the pin.
+
+## Troubleshooting
+
+| Symptom | Likely cause | Action |
+| --- | --- | --- |
+| `<provider>: model absent: …` | That account's credential is invalid, so its models left the catalog | `./scripts/reauth.py status`, then re-authenticate it |
+| `HTTP 401/403` from one provider | Revoked token, or the account lost access | Same as above |
+| `HTTP 429` or quota messages | Subscription limit reached | Wait; nothing to fix in the gateway |
+| `codebuddy: WorkBuddy refresh timer check failed` | Refresh job failed | On the server: `journalctl -u unified-proxy-workbuddy-refresh.service -n 20` |
+| Everything fails with `gateway: …` | Container, Caddy, or VM down | On the server: `docker compose -f compose.cli-proxy.yaml ps` in `/opt/unified-proxy` |
+| No Bark pushes | `BARK_KEY` secret missing | Set it in `.env.secrets`, then `./scripts/push-secrets.sh` |
+
+## Development
+
+`npm test` runs the side-effect-free unit tests. `npm run smoke` and `./scripts/reauth.py` talk to production. PRs run unit tests and Compose/script syntax checks ([PR validation](.github/workflows/pr-validation.yml)).

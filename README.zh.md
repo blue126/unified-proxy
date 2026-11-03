@@ -1,56 +1,97 @@
 # Unified Proxy
 
-当前公网入口为 Caddy 后的 CLIProxyAPI，已接入 ChatGPT/Codex、Claude、Google Antigravity 和 CodeBuddy/WorkBuddy 共享 Credits。原有 API 地址和 `PROXY_API_KEY` 继续使用，客户端无需修改配置。
+一个兼容 OpenAI 和 Anthropic 格式的 HTTPS 入口，背后是订阅账号：ChatGPT/Codex、Claude、Google Antigravity（Gemini）和 CodeBuddy/WorkBuddy。服务运行在 OCI ARM64 虚拟机上，由 Caddy 转发到 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)。客户端只用一个 API key，各 provider 的 OAuth 凭据由网关保管。
+
+本文是管理员操作指南。组件关系见 [架构文档](docs/architecture.md)，安装、恢复与旧服务下线见 [运维说明](docs/cli-subscriptions.md)。English: [README.md](README.md)。
+
+## 常用操作
+
+| 任务 | 方法 |
+| --- | --- |
+| 服务是否正常？ | 看 Bark 推送，或 **Actions → Monitor deployed proxy → Run workflow** |
+| 查看已存凭据 | `./scripts/reauth.py status` |
+| 重新认证（Mac） | `./scripts/reauth.py claude`（或 `codex`、`antigravity`、`workbuddy`） |
+| 重新认证 Claude（手机） | **Actions → Server maintenance**，先 `claude-login-start` 再 `claude-login-complete` |
+| 端到端真实检查 | `npm run smoke`（消耗额度） |
+| 部署 | 把审核过的 PR 合并到 `main` |
+| 同步 secrets 到 GitHub | `./scripts/push-secrets.sh` |
+| 单元测试 | `npm test`（Python 3.10+，无网络请求） |
 
 ## 客户端接入
 
-- Base URL：`https://<你的域名>/v1`
+- Base URL：`https://<PROXY_DOMAIN>/v1`
 - 认证：`Authorization: Bearer <PROXY_API_KEY>`
-- 模型目录：`GET /v1/models`
-- 对话：`POST /v1/chat/completions`
-- Responses：`POST /v1/responses`
-- Claude 接口：`POST /v1/messages`
+- 接口：`GET /v1/models`、`POST /v1/chat/completions`、`POST /v1/responses`、`POST /v1/messages`（Anthropic 格式）
 
-当前模型目录共 50 项。GPT、Claude、Gemini、CodeBuddy 的真实调用均已通过；目录中的其他模型仍需根据账号权限逐个确认。已测试模型及准确名称见 [README](README.md#connect-a-client)。
+| Provider | 已测试模型 | 网关持有的账号 |
+| --- | --- | --- |
+| GPT / Codex | `gpt-6-luna` | ChatGPT OAuth |
+| Claude | `claude-sonnet-5` | Claude OAuth |
+| Google | `gemini-3-flash` | Antigravity OAuth |
+| CodeBuddy / WorkBuddy | `glm-5.2`、`kimi-k2.7` | WorkBuddy 插件 OAuth（共享 Credits） |
 
-## 运行与维护
+完整模型名见 [README](README.md#connect-a-client)。模型目录约 50 项；出现在目录中不代表账号一定能调用，使用前请先测试。没有按 key 的限流，只受各订阅账号自身额度限制。
 
-使用 `compose.cli-proxy.yaml` 部署。账号凭据保存在服务器私有目录 `.cli-proxy-api/`；部署不会覆盖凭据或轮换 key。`npm test` 运行无外部请求的 Python 测试，`npm run smoke` 会真实调用模型并消耗额度。
+Claude Code：
 
-规则与 `/health` 一致：只要还有一个 provider 可用，部署和 `npm run smoke` 就通过，每个失败的 provider 记一条 warning；只有网关不可用或四家全部失败才算失败。部署时 WorkBuddy 插件、模型目录或刷新定时任务的问题也只记 warning。
+```bash
+export ANTHROPIC_BASE_URL="https://<PROXY_DOMAIN>"
+export ANTHROPIC_AUTH_TOKEN="<PROXY_API_KEY>"
+claude
+```
+
+## 配置
+
+公开仓库：不要提交任何 secret 值、真实域名或主机地址。
+
+- **本地 `.env.secrets`**（已 gitignore，模板 `.env.secrets.example`）：`OCI_HOST`、`OCI_USER`、`OCI_SSH_KEY_FILE`、`PROXY_DOMAIN`、`PROXY_API_KEY`、可选 `BARK_KEY`。含义见 [英文版](README.md#configuration)。
+- **GitHub Actions secrets**：由 `./scripts/push-secrets.sh` 同步；`OCI_SSH_FINGERPRINT` 可选，手动设置，用于维护 workflow 固定主机密钥。
+- **服务器私有目录** `/opt/unified-proxy/.cli-proxy-api/`（目录 700、文件 600）：`config.yaml`、`upstream-key`（客户端 key）、`management-key`（私有管理 API）、`auths/`（各 provider 凭据）、`plugins/`。
+
+`PROXY_API_KEY` 在 `.env.secrets`、GitHub secret 和服务器 `upstream-key` 三处必须一致；provider token 刷新不会改变客户端 key。
 
 ## 监控与告警
 
-[监控 workflow](.github/workflows/monitor.yml) 每六小时运行一次，分别检查 GPT、Claude、Gemini、CodeBuddy 的真实调用，日志中写明失败的 provider 和原因（HTTP 状态码或上游错误）。
+[监控 workflow](.github/workflows/monitor.yml) 每六小时运行一次：通过 SSH 检查 WorkBuddy 刷新定时任务，再检查客户端认证、管理路由屏蔽、模型目录，以及每个 provider 的真实调用。各 provider 独立判断，失败时写明原因，例如 `claude: model absent: claude-sonnet-5`。
 
-- 部分 provider 失败：日志 warning，并发送普通 Bark 推送，标题列出失败的 provider。
-- 全部失败：日志 error，workflow 失败，并发送时效性（time-sensitive）Bark 推送。
-- 推送可点开对应运行日志。不记录状态，故障期间每次运行都会再推送一次。
-- 需要 GitHub secret `BARK_KEY`（Bark App 首页 `https://api.day.app/<key>/` 中的 key）。在 `.env.secrets` 中填写后运行 `./scripts/push-secrets.sh` 同步。
+| 结果 | 日志 | Workflow | Bark 推送 |
+| --- | --- | --- | --- |
+| 全部正常 | `Providers OK: …` | 通过 | 无 |
+| 部分失败 | 每个 provider 一条 warning | 通过 | 普通推送，标题 `Provider down: <名称>` |
+| 全部失败或网关不可用 | error | 失败 | 时效性推送 `All providers down` |
+
+WorkBuddy 刷新定时任务失败算作 CodeBuddy 故障。告警不记录状态：故障期间每次运行都会推送，恢复时不推送。公开的 `/health` 只反映网关进程，不反映各 provider。
 
 ## 重新认证
 
-### 在本机（Mac）上：支持全部 provider
+当某个 provider 的 refresh token 被撤销或过期（监控报 `model absent` 或认证错误，`status` 显示 `error`）时需要重新认证。
 
-在带有 `.env.secrets` 的 checkout 中运行：
+**在 Mac 上**（全部 provider），在带 `.env.secrets` 的 checkout 中：
 
 ```bash
-./scripts/reauth.py claude        # 或 codex、antigravity、workbuddy
-./scripts/reauth.py status        # 查看已保存凭据及其状态
+./scripts/reauth.py status
+./scripts/reauth.py claude
 ```
 
-脚本会建立 SSH 隧道（8317 及该 provider 的回调端口），通过 SSH 把管理密钥只读入内存，用系统浏览器打开登录页，等待 CLIProxyAPI 保存凭据，最后对该 provider 做一次真实调用验证。浏览器回调经隧道直达服务器，无需粘贴；若在其他设备上授权，按提示粘贴最终地址栏 URL 即可。WorkBuddy 为扫码/浏览器登录，没有回调。需要本机 8317 和回调端口空闲。
+脚本通过 SSH 隧道连到私有管理 API 和对应回调端口，用浏览器打开登录页，等待凭据保存，最后对该 provider 做一次真实调用。在其他设备上授权时，按提示粘贴最终地址栏 URL。需要本机 8317 和回调端口（Codex 1455、Claude 54545、Antigravity 51121）空闲。换账号登录会新增一个凭据，旧的不再需要时可删除。
 
-### Claude：在手机上通过 Actions
+**手机上重新认证 Claude**：**Actions → Server maintenance** 运行 `claude-login-start`，打开日志中的链接并授权，复制打不开的 `localhost:54545` 地址，再运行 `claude-login-complete` 并填入 `callback`。详见 [运维说明](docs/cli-subscriptions.md#claude-from-the-actions-tab-no-ssh-forwarding)。
 
-无需 SSH 转发：
+## 部署
 
-1. **Actions → Server maintenance → Run workflow**，选择 `claude-login-start`，日志中会打印登录链接。
-2. 打开链接，用 Claude 订阅账号登录并授权。浏览器随后无法打开 `localhost:54545` 页面，属正常现象；复制地址栏中的完整地址（若页面显示 `code#state` 则复制它）。
-3. 再次运行，选择 `claude-login-complete`，将复制内容填入 `callback`（日志中会被遮蔽）。最后会做一次 Claude 真实调用验证。
+合并到 `main` 会运行 [部署 workflow](.github/workflows/deploy.yml)（纯文档改动跳过）：复制 Compose、脚本和 systemd 单元，校验 WorkBuddy 插件，更新容器，安装刷新定时任务，最后做公网检查。服务器必须有 `.cli-proxy-active` 标记；账号凭据和 key 不会被覆盖。
 
-`diagnose` 查看已保存的 Claude 凭据状态。登录链接会出现在公开仓库的运行日志中，没有账号授权则无效；中途失败请重新开始。其他 provider 及手动步骤见 [部署说明](docs/cli-subscriptions.md)。
+与监控一致：只要还有一个 provider 可用，部署就成功，失败的 provider 只记 warning。只有网关不可用、全部 provider 失败或部署自身步骤失败（插件校验、Compose、定时任务安装）才算失败。不要直接推送 `main`，流程见 [AGENTS.md](AGENTS.md)。
 
-ChatGPT、Claude、Antigravity 由 CLIProxyAPI 内置刷新。CodeBuddy 使用本机定时任务，每五分钟检查一次，在 token 到期前十分钟调用插件刷新接口并核对新凭据已保存。监控检查定时任务是否运行、最近一次任务是否成功及 token 是否有效。刷新凭据被撤销或失效时仍需重新登录，客户端 API key 不随订阅 token 更新。
+版本固定：CLIProxyAPI v8.0.27（镜像 digest，见 `compose.cli-proxy.yaml`），WorkBuddy v0.3.2（SHA-256，见 `scripts/cli-proxy-install-plugin.py`）。升级即修改固定版本的 PR。
 
-旧 Node 服务已屏蔽，LiteLLM/Postgres 的容器、数据库卷及旧安装文件已归档后移除。旧代码和操作说明保存在 [迁移前的历史版本](https://github.com/blue126/unified-proxy/tree/ef54ad375b8840746fb9203a9bada88c80abfb78)，恢复数据保存在服务器 `.retired-proxy/` 私有目录。完整操作与恢复步骤见 [部署说明](docs/cli-subscriptions.md)。
+## 故障排查
+
+| 现象 | 可能原因 | 处理 |
+| --- | --- | --- |
+| `<provider>: model absent: …` | 该账号凭据失效，模型从目录中消失 | `./scripts/reauth.py status`，然后重新认证 |
+| 某 provider 报 `HTTP 401/403` | token 被撤销或账号失去权限 | 同上 |
+| `HTTP 429` 或额度提示 | 订阅额度用尽 | 等待额度恢复 |
+| `codebuddy: WorkBuddy refresh timer check failed` | 刷新任务失败 | 服务器上 `journalctl -u unified-proxy-workbuddy-refresh.service -n 20` |
+| 全部失败且为 `gateway: …` | 容器、Caddy 或虚拟机故障 | 服务器 `/opt/unified-proxy` 下 `docker compose -f compose.cli-proxy.yaml ps` |
+| 收不到 Bark 推送 | 缺少 `BARK_KEY` secret | 写入 `.env.secrets` 后运行 `./scripts/push-secrets.sh` |
