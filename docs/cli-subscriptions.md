@@ -1,6 +1,6 @@
 # CLIProxyAPI operations and recovery
 
-The active gateway is CLIProxyAPI v8.0.27 behind Caddy, with the WorkBuddy v0.3.2 plugin. Both components are pinned by SHA-256. ChatGPT, Claude, Antigravity, and CodeBuddy/WorkBuddy OAuth accounts are authorized. GPT Responses, Claude and Gemini calls, and CodeBuddy GLM/Kimi calls have passed through the public endpoint with the existing key. CodeBuddy GLM streaming also passed. The gateway uses provider endpoints with stored OAuth credentials; it does not launch the official CLI for each request.
+The active gateway is CLIProxyAPI v8.0.52 behind Caddy, with the WorkBuddy v0.3.2 plugin. Both components are pinned by SHA-256. ChatGPT, Claude, Antigravity, and CodeBuddy/WorkBuddy OAuth accounts are authorized. GPT Responses, Claude and Gemini calls, and CodeBuddy GLM/Kimi calls have passed through the public endpoint with the existing key. CodeBuddy GLM streaming also passed. The gateway uses provider endpoints with stored OAuth credentials; it does not launch the official CLI for each request.
 
 ## Deploy and verify
 
