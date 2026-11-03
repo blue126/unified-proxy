@@ -11,7 +11,7 @@ This README is the operator guide. For how the pieces fit together, see [archite
 | Is everything up? | Bark alerts, or **Actions → Monitor deployed proxy → Run workflow** |
 | Check stored credentials | `./scripts/reauth.py status` |
 | Re-authenticate a provider (Mac) | `./scripts/reauth.py claude` (or `codex`, `antigravity`, `workbuddy`) |
-| Re-authenticate Claude (phone) | **Actions → Server maintenance**, `claude-login-start` then `claude-login-complete` |
+| Re-authenticate Claude (phone) | [iPhone shortcut](docs/claude-iphone-shortcut.md), or **Actions → Server maintenance**, `claude-login-start` then `claude-login-complete` |
 | Live end-to-end check | `npm run smoke` (consumes quota) |
 | Deploy | Merge a reviewed PR to `main` |
 | Sync secrets to GitHub | `./scripts/push-secrets.sh` |
