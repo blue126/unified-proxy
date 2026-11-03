@@ -35,6 +35,22 @@ def read_json(path: Path) -> dict:
     return data
 
 
+def other_provider(path: Path) -> bool:
+    """True for a regular file that is clearly not a WorkBuddy credential.
+
+    CLIProxyAPI writes other providers' files, sometimes with looser modes
+    (a fresh Claude login was 0644); those must not stop WorkBuddy refresh.
+    Anything ambiguous, such as a symlink, still goes through the strict checks.
+    """
+    if not stat.S_ISREG(path.lstat().st_mode):
+        return False
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get('type') != 'workbuddy'
+
+
 def expiry(data: dict) -> float:
     auth = data.get('auth')
     if not isinstance(auth, dict) or not auth.get('accessToken') or not auth.get('refreshToken'):
@@ -115,6 +131,8 @@ def execute(root: Path, *, force: bool = False, check: bool = False) -> tuple[in
         fcntl.flock(lock, fcntl.LOCK_EX)
         management_key = None
         for path in sorted(auth_dir.glob('*.json')):
+            if other_provider(path):
+                continue
             data = read_json(path)
             if not eligible(data):
                 continue

@@ -113,6 +113,19 @@ class WorkBuddyRefreshTests(unittest.TestCase):
                     self.module.execute(self.root)
             refresh.assert_not_called()
 
+    def test_loose_permissions_on_other_providers_do_not_block_refresh(self):
+        other = self.path.parent / 'claude-new.json'
+        other.write_text(json.dumps({'type': 'claude'}))
+        other.chmod(0o644)
+        with patch.object(self.module, 'refresh', side_effect=self.rotate) as refresh:
+            self.assertEqual(self.module.execute(self.root), (1, 1))
+        refresh.assert_called_once()
+
+    def test_loose_permissions_on_workbuddy_file_are_rejected(self):
+        self.path.chmod(0o644)
+        with self.assertRaisesRegex(RuntimeError, 'Unsafe'):
+            self.module.execute(self.root)
+
     def test_symlinked_auth_file_is_rejected(self):
         target = self.root / 'other'
         self.path.rename(target)
