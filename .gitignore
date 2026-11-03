@@ -14,3 +14,7 @@ __pycache__/
 *.pyc
 *.anthropic-login.json
 *.anthropic-login.json.*.tmp
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
