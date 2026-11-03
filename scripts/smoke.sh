@@ -33,4 +33,4 @@ fi
 [ -n "$BASE_URL" ] && [ -n "$PROXY_API_KEY" ] \
   || { echo 'BASE_URL and PROXY_API_KEY are required.' >&2; exit 1; }
 export BASE_URL PROXY_API_KEY
-exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public
+exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public "$@"

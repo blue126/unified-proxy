@@ -1,10 +1,16 @@
 name: Monitor deployed proxy
 
 # CLIProxyAPI verifies GPT, Claude, Gemini, and CodeBuddy live calls.
+# Providers are checked independently: some failing -> warning + GitHub issue (email);
+# all failing -> error + issue + Bark push.
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
 
 jobs:
   monitor:
@@ -15,6 +21,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: WorkBuddy refresh timer health
+        id: timer
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.OCI_HOST }}
@@ -28,4 +36,15 @@ jobs:
         env:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
-        run: ./scripts/smoke.sh
+        run: ./scripts/smoke.sh --monitor --results "$RUNNER_TEMP/provider-results.json"
+
+      - name: Alert on provider failures
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+          TIMER_OUTCOME: ${{ steps.timer.outcome }}
+        run: |
+          if [ -f "$RUNNER_TEMP/provider-results.json" ]; then
+            python3 scripts/monitor-notify.py "$RUNNER_TEMP/provider-results.json"
+          fi

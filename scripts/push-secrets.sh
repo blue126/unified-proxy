@@ -22,6 +22,7 @@ OCI_USER=$(get_val OCI_USER)
 OCI_SSH_KEY_FILE=$(get_val OCI_SSH_KEY_FILE)
 PROXY_DOMAIN=$(get_val PROXY_DOMAIN)
 PROXY_API_KEY=$(get_val PROXY_API_KEY)
+BARK_KEY=$(get_val BARK_KEY || true)
 
 for var in OCI_HOST OCI_USER OCI_SSH_KEY_FILE PROXY_DOMAIN PROXY_API_KEY; do
   [ -n "${!var}" ] || { echo "Error: $var is not set in .env.secrets"; exit 1; }
@@ -41,7 +42,8 @@ gh secret set OCI_USER      --body "$OCI_USER"
 gh secret set OCI_SSH_KEY   < "$SSH_KEY_FILE"
 gh secret set PROXY_DOMAIN  --body "$PROXY_DOMAIN"
 gh secret set PROXY_API_KEY --body "$PROXY_API_KEY"
+[ -z "$BARK_KEY" ] || gh secret set BARK_KEY --body "$BARK_KEY"
 
-echo "Done. All 5 secrets pushed to GitHub."
+echo "Done. Secrets pushed to GitHub."
 echo ""
 echo "Verify at: https://github.com/$(gh repo view --json nameWithOwner -q .nameWithOwner)/settings/secrets/actions"
