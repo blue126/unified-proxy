@@ -10,7 +10,8 @@ services:
     init: true
     read_only: true
     tmpfs:
-      - /tmp:size=64m
+      # v8.0.52+ copies plugins to /tmp before dlopen, so /tmp must allow exec.
+      - /tmp:size=64m,exec,nosuid,nodev
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
