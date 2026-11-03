@@ -5,7 +5,9 @@
 #   ./scripts/smoke.sh                        # reads BASE_URL + KEY from .env.secrets
 #   BASE_URL=https://... PROXY_API_KEY=... ./scripts/smoke.sh   # override via env
 #
-# CLIProxyAPI checks GPT, Claude, Gemini, and CodeBuddy.
+# CLIProxyAPI checks GPT, Claude, Gemini, and CodeBuddy. Like /health, it passes
+# while at least one provider works: failing providers are warnings, and only
+# a gateway failure or all providers failing exits non-zero.
 
 set -uo pipefail
 
@@ -33,4 +35,4 @@ fi
 [ -n "$BASE_URL" ] && [ -n "$PROXY_API_KEY" ] \
   || { echo 'BASE_URL and PROXY_API_KEY are required.' >&2; exit 1; }
 export BASE_URL PROXY_API_KEY
-exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public "$@"
+exec python3 "${SCRIPT_DIR}/cli-proxy-public-smoke.py" --public --monitor "$@"

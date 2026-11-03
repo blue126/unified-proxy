@@ -35,7 +35,7 @@ jobs:
         env:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
-        run: ./scripts/smoke.sh --monitor --results "$RUNNER_TEMP/provider-results.json"
+        run: ./scripts/smoke.sh --results "$RUNNER_TEMP/provider-results.json"
 
       - name: Alert on provider failures
         if: always()

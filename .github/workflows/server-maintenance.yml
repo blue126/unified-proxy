@@ -114,7 +114,7 @@ jobs:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
         run: |
-          ./scripts/smoke.sh --monitor --results "$RUNNER_TEMP/results.json" || true
+          ./scripts/smoke.sh --results "$RUNNER_TEMP/results.json" || true
           python3 - <<'PY'
           import json
           import os
