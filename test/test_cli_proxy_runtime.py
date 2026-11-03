@@ -83,6 +83,110 @@ class PublicSmokeTests(unittest.TestCase):
             self.invoke()
 
 
+class MonitorModeTests(PublicSmokeTests):
+    def invoke_monitor(self):
+        path = Path(tempfile.mkdtemp()) / 'results.json'
+        with patch.object(self.module, 'request', side_effect=self.request), \
+                patch.dict(os.environ, {'PROXY_API_KEY': 'test-only'}, clear=True), \
+                patch('sys.argv', ['smoke', '--public', '--monitor', '--results', str(path)]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            code = self.module.main()
+        import json
+        return code, json.loads(path.read_text()), out.getvalue()
+
+    def test_one_failing_provider_is_a_warning_and_named(self):
+        self.empty_model = 'claude-sonnet-5'
+        code, results, out = self.invoke_monitor()
+        self.assertEqual(code, 0)
+        self.assertEqual([n for n, r in results['providers'].items() if not r['ok']], ['claude'])
+        self.assertIn('::warning title=Provider claude failed::', out)
+        self.assertEqual(self.called, ['gpt-6-luna', 'claude-sonnet-5', 'gemini-3-flash', 'glm-5.2'])
+
+    def test_missing_models_fail_only_that_provider(self):
+        self.catalog.remove('glm-5.2')
+        code, results, out = self.invoke_monitor()
+        self.assertEqual(code, 0)
+        self.assertFalse(results['providers']['codebuddy']['ok'])
+        self.assertTrue(results['providers']['claude']['ok'])
+
+    def test_all_providers_failing_is_an_error(self):
+        self.completed = False
+        self.empty_model = None
+
+        def failing(base, path, key='', payload=None):
+            if path.startswith('/v1/') and payload is not None:
+                raise HTTPError('https://example.invalid', 403, '', {}, None)
+            return PublicSmokeTests.request(self, base, path, key, payload)
+
+        self.request = failing
+        code, results, out = self.invoke_monitor()
+        self.assertEqual(code, 1)
+        self.assertEqual(out.count('::error '), 4)
+        self.assertIn('HTTP 403', results['providers']['claude']['reason'])
+
+    def test_gateway_failure_marks_every_provider(self):
+        self.allow_anonymous = True
+        code, results, out = self.invoke_monitor()
+        self.assertEqual(code, 1)
+        self.assertTrue(all(not r['ok'] for r in results['providers'].values()))
+
+
+class MonitorNotifyTests(unittest.TestCase):
+    def setUp(self):
+        self.module = load('monitor-notify')
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.calls = []
+        self.pushes = []
+        self.existing = None
+
+    def run_with(self, providers, timer='success'):
+        import json
+        path = Path(self.directory.name) / 'r.json'
+        path.write_text(json.dumps({'gateway_error': '', 'providers': providers}))
+
+        def gh(*args):
+            self.calls.append(args)
+            return json.dumps([self.existing] if self.existing else [])
+
+        with patch.object(self.module, 'gh', side_effect=gh), \
+                patch.object(self.module, 'bark', side_effect=lambda t, b: self.pushes.append((t, b))), \
+                patch.dict(os.environ, {'TIMER_OUTCOME': timer, 'GITHUB_RUN_ID': '1'}, clear=True), \
+                patch('sys.argv', ['notify', str(path)]), contextlib.redirect_stdout(io.StringIO()):
+            return self.module.main()
+
+    @staticmethod
+    def status(**flags):
+        return {n: {'ok': ok, 'reason': '' if ok else 'HTTP 403'} for n, ok in flags.items()}
+
+    def test_partial_failure_opens_issue_without_push(self):
+        self.run_with(self.status(gpt=True, claude=False, gemini=True, codebuddy=True))
+        self.assertEqual(self.pushes, [])
+        create = [c for c in self.calls if c[:2] == ('issue', 'create')]
+        self.assertEqual(len(create), 1)
+        self.assertIn('**claude**: HTTP 403', create[0][-1])
+
+    def test_all_failing_pushes_to_phone(self):
+        self.run_with(self.status(gpt=False, claude=False, gemini=False, codebuddy=False))
+        self.assertEqual(len(self.pushes), 1)
+        self.assertIn('claude: HTTP 403', self.pushes[0][1])
+
+    def test_unchanged_alert_is_not_repeated(self):
+        self.existing = {'number': 7, 'body': 'x <!-- failed:claude -->'}
+        self.run_with(self.status(gpt=True, claude=False))
+        self.assertEqual([c for c in self.calls if c[0] == 'issue' and c[1] != 'list'], [])
+
+    def test_recovery_closes_issue(self):
+        self.existing = {'number': 7, 'body': '<!-- failed:claude -->'}
+        self.run_with(self.status(gpt=True, claude=True))
+        self.assertTrue(any(c[:3] == ('issue', 'close', '7') for c in self.calls))
+
+    def test_timer_failure_counts_against_codebuddy(self):
+        self.run_with(self.status(gpt=True, codebuddy=True), timer='failure')
+        create = [c for c in self.calls if c[:2] == ('issue', 'create')]
+        self.assertIn('**codebuddy**: WorkBuddy refresh timer check failed', create[0][-1])
+
+
 class PrivateInitializationTests(unittest.TestCase):
     def setUp(self):
         self.module = load('cli-proxy-init')
