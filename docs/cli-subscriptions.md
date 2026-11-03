@@ -50,6 +50,16 @@ Create a fresh login with the management key via these private endpoints:
 
 The response contains a short-lived URL and state. Complete login with the intended account, then check `/v0/management/get-auth-status?state=<state>` privately. Keep `auths/` mode 700 and credential files mode 600. Never place management keys, browser passwords, or OAuth tokens in GitHub issues or logs. An expired session needs a new URL; successfully saved account credentials do not need to be authorized again.
 
+### Claude from the Actions tab (no SSH forwarding)
+
+For Claude only, `server-maintenance.yml` can run the login from a phone. It uses `SSH` to reach the server's management API, so it needs the existing `OCI_*` secrets and runs only from `main`.
+
+1. **Actions → Server maintenance → Run workflow**, operation `claude-login-start`. The log prints a login URL.
+2. Open it in a browser, sign in with the Claude subscription account, and approve. The browser then fails to load a `localhost:54545` page; that is expected. Copy the full address-bar URL (or the `code#state` text if one is shown).
+3. Run the workflow again with operation `claude-login-complete` and that value as `callback`. It is masked in the logs. The run ends with a live Claude inference check.
+
+`diagnose` lists the stored Claude credential's status. The login URL is visible in the run log, and this repository is public; it is useless without your Claude account approval, and the callback is masked, but start a new login if a step fails midway. `scripts/cli-proxy-claude-auth.py` uses the v0 management endpoints `anthropic-auth-url`, `oauth-callback`, and `get-auth-status`; if a CLIProxyAPI upgrade changes them, fall back to the manual steps above.
+
 After login, query the actual catalog and verify a model:
 
 ```bash
