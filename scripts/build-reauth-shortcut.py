@@ -8,9 +8,27 @@ import subprocess
 import uuid
 
 
-# What claude-login-complete accepts: the failed localhost callback URL, or code#state.
-CALLBACK_PATTERN = (r'^(http://(localhost|127\.0\.0\.1):54545/callback\?\S*code=\S+'
-                    r'|[A-Za-z0-9_.~+/=-]+#[A-Za-z0-9_.~+/=-]+)$')
+# operation prefix -> menu label, login URL in the run log, and accepted callback text.
+# Claude may show code#state instead of a failed localhost page; Codex always redirects.
+PROVIDERS = {
+    'claude': {
+        'label': 'Claude',
+        'login_url': r'https://claude\.ai/oauth/authorize\?[^\s<>]+',
+        'callback': (r'^(http://(localhost|127\.0\.0\.1):54545/callback\?\S*code=\S+'
+                     r'|[A-Za-z0-9_.~+/=-]+#[A-Za-z0-9_.~+/=-]+)$'),
+        'copy_hint': '复制地址栏中的完整地址（若页面显示 code#state 则复制它）',
+        'paste_prompt': '粘贴授权后浏览器地址栏的完整 localhost 地址，或页面显示的 code#state',
+        'format_error': '格式不正确。需要完整的 http://localhost:54545/callback?... 地址，或一行 code#state。',
+    },
+    'codex': {
+        'label': 'Codex',
+        'login_url': r'https://auth\.openai\.com/oauth/authorize\?[^\s<>]+',
+        'callback': r'^http://(localhost|127\.0\.0\.1):1455/auth/callback\?\S*code=\S+$',
+        'copy_hint': '复制地址栏中的完整地址',
+        'paste_prompt': '粘贴授权后浏览器地址栏的完整 localhost 地址',
+        'format_error': '格式不正确。需要完整的 http://localhost:1455/auth/callback?... 地址。',
+    },
+}
 
 
 def uid():
@@ -57,7 +75,7 @@ class Shortcut:
         self.api = f'https://api.github.com/repos/{repository}/actions'
         self.workflow = 'server-maintenance.yml'
         self.action('comment', WFCommentActionText=(
-            'Claude 重新认证：开始授权 → 浏览器授权 → 提交授权后的地址。\n'
+            '订阅重新认证（Claude / Codex）：开始授权 → 浏览器授权 → 提交授权后的地址。\n'
             '登录链接几分钟后过期，请一次完成，不要重复开始。\n'
             '使用现有 main 分支 Server maintenance Actions。\n'
             '本快捷指令含个人 GitHub 凭证，请仅通过自己的 iCloud 同步，不要分享或导出。'))
@@ -147,7 +165,7 @@ class Shortcut:
         return self.first(self.key(response, 'workflow_runs'))
 
     def failure(self, message, run_url=None):
-        self.alert('Claude 认证未完成', message,
+        self.alert('重新认证未完成', message,
                    '\n可选择“查看最近结果”打开 Actions。不要重复提交同一授权码。')
         if run_url:
             self.action('openurl', WFInput=run_url)
@@ -200,50 +218,25 @@ class Shortcut:
 
     def build(self):
         menu = uid()
-        choices = ['开始浏览器授权', '提交授权码', '查看最近结果']
+        latest = '查看最近结果'
+        choices = [f'{p["label"]}：{step}' for p in PROVIDERS.values()
+                   for step in ('开始浏览器授权', '提交授权码')] + [latest]
         self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=0,
-                    WFMenuItems=choices, WFMenuPrompt='Claude 重新认证')
+                    WFMenuItems=choices, WFMenuPrompt='订阅重新认证')
+        for operation, provider in PROVIDERS.items():
+            self.login_start(menu, operation, provider)
+            self.login_complete(menu, operation, provider)
         self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=1,
-                    WFMenuItemTitle=choices[0])
-        self.dispatch_and_wait('claude-login-start')
-        logs = self.http(token_string(self.api, '/runs/', variable('RunID'), '/logs'))
-        files = self.action('unzip', WFArchive=logs)
-        text = self.action('detect.text', WFInput=files)
-        matches = self.action('text.match', WFMatchTextPattern=r'https://claude\.ai/oauth/authorize\?[^\s<>]+',
-                              text=token_string(text))
-        has_url = self.conditional(matches)
-        self.otherwise(has_url)
-        self.failure('维护成功，但日志中未找到 Claude 授权链接。', variable('RunURL'))
-        self.endif(has_url)
-        self.alert('请在浏览器完成授权',
-                   '浏览器即将打开。授权后页面会打不开 localhost，这是正常的：复制地址栏中的完整地址'
-                   '（若页面显示 code#state 则复制它），再运行本快捷指令并选择“提交授权码”。\n'
-                   '请在几分钟内完成，期间不要再次选择“开始浏览器授权”。')
-        self.action('openurl', WFInput=self.first(matches))
-        self.stop('已打开 Claude 授权页面')
-        self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=1,
-                    WFMenuItemTitle=choices[1])
-        code = self.action('ask', WFAskActionPrompt='粘贴授权后浏览器地址栏的完整 localhost 地址，或页面显示的 code#state',
-                           WFInputType='Text', WFAskActionMultiline=False)
-        valid = self.action('text.match', WFMatchTextPattern=CALLBACK_PATTERN, text=token_string(code))
-        correct = self.conditional(valid)
-        self.otherwise(correct)
-        self.failure('格式不正确。需要完整的 http://localhost:54545/callback?... 地址，或一行 code#state。')
-        self.endif(correct)
-        self.dispatch_and_wait('claude-login-complete', self.first(valid))
-        self.alert('Claude 重新认证成功', '凭证已保存，Claude 实际推理验证通过。')
-        self.stop('Claude 重新认证成功；实际推理验证通过')
-        self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=1,
-                    WFMenuItemTitle=choices[2])
+                    WFMenuItemTitle=latest)
         self.setvar('LatestRun', self.latest())
         status = self.key(variable('LatestRun'), 'status')
         result = self.key(variable('LatestRun'), 'conclusion')
         self.alert('最近一次维护运行', '状态：', status, '\n结果：', result,
-                   '\n将打开该次 Actions 运行。只有 claude-login-complete 成功才表示推理验证通过。')
+                   '\n将打开该次 Actions 运行。只有 *-login-complete 成功才表示推理验证通过。')
         self.action('openurl', WFInput=self.key(variable('LatestRun'), 'html_url'))
         self.stop('已打开最近维护结果')
         self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=2)
-        return {'WFWorkflowName': 'Claude 重新认证', 'WFWorkflowMinimumClientVersion': 900,
+        return {'WFWorkflowName': '订阅重新认证', 'WFWorkflowMinimumClientVersion': 900,
                 'WFWorkflowMinimumClientVersionString': '900', 'WFWorkflowClientVersion': '5037.0.19',
                 'WFWorkflowIcon': {'WFWorkflowIconStartColor': 4251333119,
                                    'WFWorkflowIconGlyphNumber': 59511},
@@ -251,6 +244,42 @@ class Shortcut:
                 'WFWorkflowInputContentItemClasses': [], 'WFWorkflowOutputContentItemClasses': [],
                 'WFWorkflowImportQuestions': [], 'WFQuickActionSurfaces': [],
                 'WFWorkflowHasOutputFallback': False, 'WFWorkflowHasShortcutInputVariables': False}
+
+    def login_start(self, menu, operation, provider):
+        label = provider['label']
+        self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=1,
+                    WFMenuItemTitle=f'{label}：开始浏览器授权')
+        self.dispatch_and_wait(f'{operation}-login-start')
+        logs = self.http(token_string(self.api, '/runs/', variable('RunID'), '/logs'))
+        files = self.action('unzip', WFArchive=logs)
+        text = self.action('detect.text', WFInput=files)
+        matches = self.action('text.match', WFMatchTextPattern=provider['login_url'],
+                              text=token_string(text))
+        has_url = self.conditional(matches)
+        self.otherwise(has_url)
+        self.failure(f'维护成功，但日志中未找到 {label} 授权链接。', variable('RunURL'))
+        self.endif(has_url)
+        self.alert('请在浏览器完成授权',
+                   f'浏览器即将打开。授权后页面会打不开 localhost，这是正常的：{provider["copy_hint"]}，'
+                   f'再运行本快捷指令并选择“{label}：提交授权码”。\n'
+                   '请在几分钟内完成，期间不要再次开始同一授权。')
+        self.action('openurl', WFInput=self.first(matches))
+        self.stop(f'已打开 {label} 授权页面')
+
+    def login_complete(self, menu, operation, provider):
+        label = provider['label']
+        self.action('choosefrommenu', GroupingIdentifier=menu, WFControlFlowMode=1,
+                    WFMenuItemTitle=f'{label}：提交授权码')
+        code = self.action('ask', WFAskActionPrompt=provider['paste_prompt'],
+                           WFInputType='Text', WFAskActionMultiline=False)
+        valid = self.action('text.match', WFMatchTextPattern=provider['callback'], text=token_string(code))
+        correct = self.conditional(valid)
+        self.otherwise(correct)
+        self.failure(provider['format_error'])
+        self.endif(correct)
+        self.dispatch_and_wait(f'{operation}-login-complete', self.first(valid))
+        self.alert(f'{label} 重新认证成功', f'凭证已保存，{label} 实际推理验证通过。')
+        self.stop(f'{label} 重新认证成功；实际推理验证通过')
 
 
 def main():

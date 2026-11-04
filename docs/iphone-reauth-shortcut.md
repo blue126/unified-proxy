@@ -1,4 +1,4 @@
-# Claude re-authentication from an iPhone
+# Claude and Codex re-authentication from an iPhone
 
 The native Apple Shortcut uses the existing `server-maintenance.yml` workflow on
 `main`. It runs on an iPhone without a running Mac, SSH client, or shell action.
@@ -12,11 +12,11 @@ Choose a private directory **outside the repository** for generated files.
 Generate a preview without a credential:
 
 ```sh
-python3 scripts/build-claude-shortcut.py \
-  --output /private/tmp/claude-preview.unsigned.shortcut
+python3 scripts/build-reauth-shortcut.py \
+  --output /private/tmp/reauth-preview.unsigned.shortcut
 shortcuts sign --mode people-who-know-me \
-  --input /private/tmp/claude-preview.unsigned.shortcut \
-  --output '/private/tmp/Claude 重新认证.shortcut'
+  --input /private/tmp/reauth-preview.unsigned.shortcut \
+  --output '/private/tmp/订阅重新认证.shortcut'
 ```
 
 In Shortcuts, choose **File → Import**, select the signed file, review its actions,
@@ -41,20 +41,26 @@ need private permissions if they contain a token.
 
 ## Use on an iPhone
 
-1. Run **Claude 重新认证 → 开始浏览器授权**. Keep Shortcuts in the foreground while
-   it dispatches and waits for the workflow. It downloads the run's log ZIP,
-   extracts the Claude authorization URL, and opens it in your browser.
-2. Sign in and approve. The browser then fails to open a `localhost:54545` page;
-   that is expected. Copy the full address-bar URL (or the `code#state` text if one
-   is shown). The pending login expires after a few minutes.
-3. Run **Claude 重新认证 → 提交授权码**, paste it, and keep Shortcuts open while it
-   waits. It is sent as the workflow's masked `callback` input. A success alert means
-   `claude-login-complete` saved the credential and passed a live Claude call.
+The menu has a start and a submit item for each provider. Use the pair for the
+account you are renewing.
+
+1. Run **订阅重新认证 → Claude：开始浏览器授权** (or **Codex：开始浏览器授权**). Keep
+   Shortcuts in the foreground while it dispatches and waits for the workflow. It
+   downloads the run's log ZIP, extracts the authorization URL, and opens it in
+   your browser.
+2. Sign in and approve. The browser then fails to open a `localhost` page (port
+   54545 for Claude, 1455 for Codex); that is expected. Copy the full address-bar
+   URL (or, for Claude, the `code#state` text if one is shown). The pending login
+   expires after a few minutes.
+3. Run **订阅重新认证 → Claude：提交授权码** (or **Codex：提交授权码**), paste it, and
+   keep Shortcuts open while it waits. It is sent as the workflow's masked `callback`
+   input. A success alert means the matching `*-login-complete` run saved the
+   credential and passed a live inference call.
 4. **查看最近结果** shows the latest maintenance status and opens its Actions run.
    A successful *start* run only means a link was generated; confirm the *complete*
    run when checking whether re-authentication succeeded.
 
-Use one login session at a time; do not repeatedly select “开始浏览器授权”. Discovery filters by workflow,
+Use one login session at a time; do not repeatedly select a “开始浏览器授权” item. Discovery filters by workflow,
 `main`, dispatch event, and GitHub actor, and compares the newest run ID with the
 ID before dispatch. Concurrent dispatches by the same actor can still interfere;
 avoid using the web workflow and shortcut simultaneously.
@@ -68,7 +74,7 @@ after the shortcut times out; check its result before trying again.
 
 On the Mac, enable **Shortcuts → Settings → General → iCloud Sync**. On the iPhone,
 use the same Apple Account, enable Shortcuts in iCloud, and open **Shortcuts → All
-Shortcuts**. Confirm that **Claude 重新认证** appears and has all three menu items.
+Shortcuts**. Confirm that **订阅重新认证** appears and has all five menu items.
 Run **查看最近结果** on the phone to verify its GitHub access and result prompt.
 Checking the Mac's setting alone does not prove that the phone received it.
 

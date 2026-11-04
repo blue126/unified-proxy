@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Re-authenticate the Claude account through CLIProxyAPI's private management API.
+"""Re-authenticate a Claude or Codex account through CLIProxyAPI's private management API.
 
 Runs on the server over SSH from server-maintenance.yml; no browser, port forward
 or interactive stdin. `start` prints a login URL. After approving it, copy the
 final callback URL (or the `code#state` text) and pass it to `complete` through
-the CLAUDE_CALLBACK environment variable. Nothing secret is ever printed.
+the OAUTH_CALLBACK environment variable. Nothing secret is ever printed.
 """
 
 from __future__ import annotations
@@ -22,8 +22,15 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 API = 'http://127.0.0.1:8317/v0/management'
-CALLBACK = 'http://localhost:54545/callback'
 TOKEN = r'[A-Za-z0-9_.~+/=-]+'
+
+# provider -> (label, auth-url endpoint, callback provider, callback URL, stored credential types)
+PROVIDERS = {
+    'claude': ('Claude', 'anthropic-auth-url?is_webui=true', 'anthropic',
+               'http://localhost:54545/callback', ('claude', 'anthropic')),
+    'codex': ('Codex', 'codex-auth-url?is_webui=true', 'codex',
+              'http://localhost:1455/auth/callback', ('codex',)),
+}
 
 
 class RejectRedirect(HTTPRedirectHandler):
@@ -69,64 +76,68 @@ def parse_callback(text: str) -> tuple[str, str]:
     return code, state
 
 
-def start(key: str) -> None:
-    reply = call(key, '/anthropic-auth-url?is_webui=true')
+def start(key: str, provider: str) -> None:
+    label, endpoint = PROVIDERS[provider][:2]
+    reply = call(key, '/' + endpoint)
     if not reply.get('url') or not reply.get('state'):
         raise RuntimeError('CLIProxyAPI returned no login URL.')
-    print('Open this URL, sign in with the Claude subscription account, and approve:')
+    print(f'Open this URL, sign in with the {label} subscription account, and approve:')
     print(reply['url'])
     print('The browser then fails to load a localhost page. That is expected: copy the')
     print('full address-bar URL (or the code#state text shown) into the complete step.')
     print('The login expires after a few minutes.')
 
 
-def complete(key: str, callback: str, wait: float = 60) -> None:
+def complete(key: str, provider: str, callback: str, wait: float = 60) -> None:
+    label, _, callback_provider, callback_url, _ = PROVIDERS[provider]
     code, state = parse_callback(callback)
     call(key, '/oauth-callback', {
-        'provider': 'anthropic',
-        'redirect_url': CALLBACK + '?' + urlencode({'code': code, 'state': state}),
+        'provider': callback_provider,
+        'redirect_url': callback_url + '?' + urlencode({'code': code, 'state': state}),
     })
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         status = call(key, '/get-auth-status?' + urlencode({'state': state})).get('status')
         if status == 'ok':
-            print('Claude login saved.')
+            print(f'{label} login saved.')
             return
         if status == 'error':
-            raise RuntimeError('CLIProxyAPI rejected the Claude login; start a new one.')
+            raise RuntimeError(f'CLIProxyAPI rejected the {label} login; start a new one.')
         time.sleep(2)
-    raise RuntimeError('Timed out waiting for the Claude login to be saved.')
+    raise RuntimeError(f'Timed out waiting for the {label} login to be saved.')
 
 
 def status(key: str) -> None:
     reply = call(key, '/auth-files')
     files = reply.get('files', reply) if isinstance(reply, dict) else reply
+    kinds = {kind for provider in PROVIDERS.values() for kind in provider[4]}
     shown = 0
     for item in files if isinstance(files, list) else []:
         kind = str(item.get('provider') or item.get('type') or '')
-        if kind.lower() not in ('claude', 'anthropic'):
+        if kind.lower() not in kinds:
             continue
-        fields = {name: item.get(name) for name in ('name', 'status', 'disabled', 'expired', 'expires_at')
+        fields = {name: item.get(name) for name in ('provider', 'name', 'status', 'disabled', 'expired', 'expires_at')
                   if item.get(name) not in (None, '')}
         print(json.dumps(fields, sort_keys=True))
         shown += 1
     if not shown:
-        print('No Claude credential is stored.')
+        print('No Claude or Codex credential is stored.')
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('start', 'complete', 'status'))
+    parser.add_argument('--provider', choices=PROVIDERS, default='claude')
     parser.add_argument('--root', type=Path, default=Path('/opt/unified-proxy'))
     args = parser.parse_args()
     try:
         key = management_key(args.root)
         if args.command == 'start':
-            start(key)
+            start(key, args.provider)
         elif args.command == 'status':
             status(key)
         else:
-            complete(key, os.environ.get('CLAUDE_CALLBACK', ''))
+            complete(key, args.provider, os.environ.get('OAUTH_CALLBACK', ''))
     except HTTPError as error:
         print(f'Management API returned HTTP {error.code}.', file=sys.stderr)
         return 1

@@ -11,7 +11,7 @@
 | 服务是否正常？ | 看 Bark 推送，或 **Actions → Monitor deployed proxy → Run workflow** |
 | 查看已存凭据 | `./scripts/reauth.py status` |
 | 重新认证（Mac） | `./scripts/reauth.py claude`（或 `codex`、`antigravity`、`workbuddy`） |
-| 重新认证 Claude（手机） | [iPhone 快捷指令](docs/claude-iphone-shortcut.md)，或 **Actions → Server maintenance**，先 `claude-login-start` 再 `claude-login-complete` |
+| 重新认证 Claude 或 Codex（手机） | [iPhone 快捷指令](docs/iphone-reauth-shortcut.md)，或 **Actions → Server maintenance**，先 `claude-login-start` 再 `claude-login-complete`（Codex：先 `codex-login-start` 再 `codex-login-complete`） |
 | 端到端真实检查 | `npm run smoke`（消耗额度） |
 | 部署 | 把审核过的 PR 合并到 `main` |
 | 同步 secrets 到 GitHub | `./scripts/push-secrets.sh` |
@@ -75,7 +75,7 @@ WorkBuddy 刷新定时任务失败算作 CodeBuddy 故障。告警不记录状�
 
 脚本通过 SSH 隧道连到私有管理 API 和对应回调端口，用浏览器打开登录页，等待凭据保存，最后对该 provider 做一次真实调用。在其他设备上授权时，按提示粘贴最终地址栏 URL。需要本机 8317 和回调端口（Codex 1455、Claude 54545、Antigravity 51121）空闲。换账号登录会新增一个凭据，旧的不再需要时可删除。
 
-**手机上重新认证 Claude**：**Actions → Server maintenance** 运行 `claude-login-start`，打开日志中的链接并授权，复制打不开的 `localhost:54545` 地址，再运行 `claude-login-complete` 并填入 `callback`。详见 [运维说明](docs/cli-subscriptions.md#claude-from-the-actions-tab-no-ssh-forwarding)。
+**手机上重新认证 Claude 或 Codex**：**Actions → Server maintenance** 运行 `claude-login-start` 或 `codex-login-start`，打开日志中的链接并授权，复制打不开的 `localhost` 地址，再运行对应的 `*-login-complete` 并填入 `callback`。详见 [运维说明](docs/cli-subscriptions.md#claude-or-codex-from-the-actions-tab-no-ssh-forwarding)。
 
 ## 部署
 

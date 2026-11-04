@@ -61,15 +61,15 @@ From a checkout with `.env.secrets`, run one of:
 
 It opens an SSH tunnel for port 8317 and that provider's callback port, reads the management key over SSH into memory only, opens the login page in the system browser, and waits until CLIProxyAPI saves the credential. The browser callback reaches the server through the tunnel, so nothing needs pasting; if you approved on another device, paste the final address-bar URL at the prompt. WorkBuddy uses a QR/browser login without a callback. Each login ends with a live inference check for that provider. Local ports 8317 and the callback port must be free.
 
-### Claude from the Actions tab (no SSH forwarding)
+### Claude or Codex from the Actions tab (no SSH forwarding)
 
-For Claude only, `server-maintenance.yml` can run the login from a phone. It uses `SSH` to reach the server's management API, so it needs the existing `OCI_*` secrets and runs only from `main`.
+For Claude and Codex, `server-maintenance.yml` can run the login from a phone. It uses `SSH` to reach the server's management API, so it needs the existing `OCI_*` secrets and runs only from `main`.
 
-1. **Actions → Server maintenance → Run workflow**, operation `claude-login-start`. The log prints a login URL.
-2. Open it in a browser, sign in with the Claude subscription account, and approve. The browser then fails to load a `localhost:54545` page; that is expected. Copy the full address-bar URL (or the `code#state` text if one is shown).
-3. Run the workflow again with operation `claude-login-complete` and that value as `callback`. It is masked in the logs. The run ends with a live Claude inference check.
+1. **Actions → Server maintenance → Run workflow**, operation `claude-login-start` or `codex-login-start`. The log prints a login URL.
+2. Open it in a browser, sign in with the subscription account, and approve. The browser then fails to load a `localhost` page (port 54545 for Claude, 1455 for Codex); that is expected. Copy the full address-bar URL (or, for Claude, the `code#state` text if one is shown).
+3. Run the workflow again with the matching `*-login-complete` operation and that value as `callback`. It is masked in the logs. The run ends with a live inference check for that provider.
 
-The [iPhone shortcut](claude-iphone-shortcut.md) runs the same two steps from the Shortcuts app. `diagnose` lists the stored Claude credential's status. The login URL is visible in the run log, and this repository is public; it is useless without your Claude account approval, and the callback is masked, but start a new login if a step fails midway. `scripts/cli-proxy-claude-auth.py` uses the v0 management endpoints `anthropic-auth-url`, `oauth-callback`, and `get-auth-status`; if a CLIProxyAPI upgrade changes them, fall back to the manual steps above.
+The [iPhone shortcut](iphone-reauth-shortcut.md) runs the same two steps from the Shortcuts app. `diagnose` lists the stored Claude and Codex credentials' status. The login URL is visible in the run log, and this repository is public; it is useless without your account approval, and the callback is masked, but start a new login if a step fails midway. `scripts/cli-proxy-oauth-login.py` uses the v0 management endpoints `anthropic-auth-url`, `codex-auth-url`, `oauth-callback`, and `get-auth-status`; if a CLIProxyAPI upgrade changes them, fall back to the manual steps above.
 
 After login, query the actual catalog and verify a model:
 

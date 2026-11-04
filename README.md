@@ -11,7 +11,7 @@ This README is the operator guide. For how the pieces fit together, see [archite
 | Is everything up? | Bark alerts, or **Actions → Monitor deployed proxy → Run workflow** |
 | Check stored credentials | `./scripts/reauth.py status` |
 | Re-authenticate a provider (Mac) | `./scripts/reauth.py claude` (or `codex`, `antigravity`, `workbuddy`) |
-| Re-authenticate Claude (phone) | [iPhone shortcut](docs/claude-iphone-shortcut.md), or **Actions → Server maintenance**, `claude-login-start` then `claude-login-complete` |
+| Re-authenticate Claude or Codex (phone) | [iPhone shortcut](docs/iphone-reauth-shortcut.md), or **Actions → Server maintenance**, `claude-login-start` then `claude-login-complete` (Codex: `codex-login-start` then `codex-login-complete`) |
 | Live end-to-end check | `npm run smoke` (consumes quota) |
 | Deploy | Merge a reviewed PR to `main` |
 | Sync secrets to GitHub | `./scripts/push-secrets.sh` |
@@ -90,7 +90,7 @@ Needed when a provider's refresh token is revoked or expired: the monitor report
 
 The script tunnels the private management API and the provider's callback port over SSH, opens the login page in your browser, waits for CLIProxyAPI to save the credential, and ends with a live call for that provider. If you approve on another device, paste the final address-bar URL when prompted. Local port 8317 and the callback port (Codex 1455, Claude 54545, Antigravity 51121) must be free. Signing in with a different account adds a new credential; delete the old one later if it is no longer wanted.
 
-**Claude from a phone**: run **Actions → Server maintenance** with `claude-login-start`, open the logged URL and approve, copy the failed `localhost:54545` address, then run `claude-login-complete` with it as `callback`. Details: [operations](docs/cli-subscriptions.md#claude-from-the-actions-tab-no-ssh-forwarding).
+**Claude or Codex from a phone**: run **Actions → Server maintenance** with `claude-login-start` or `codex-login-start`, open the logged URL and approve, copy the failed `localhost` address, then run the matching `*-login-complete` with it as `callback`. Details: [operations](docs/cli-subscriptions.md#claude-or-codex-from-the-actions-tab-no-ssh-forwarding).
 
 ## Deploy
 
