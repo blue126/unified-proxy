@@ -1,9 +1,9 @@
 name: Server maintenance
 
-# Claude re-authentication without a Mac, port forward or browser on the server:
-#   1. Run claude-login-start, open the URL printed in the log, approve.
+# Claude or Codex re-authentication without a Mac, port forward or browser on the server:
+#   1. Run <provider>-login-start, open the URL printed in the log, approve.
 #   2. Copy the final (failed) localhost address, or the code#state text.
-#   3. Run claude-login-complete with that value as callback.
+#   3. Run <provider>-login-complete with that value as callback.
 on:
   workflow_dispatch:
     inputs:
@@ -16,6 +16,8 @@ on:
           - diagnose
           - claude-login-start
           - claude-login-complete
+          - codex-login-start
+          - codex-login-complete
       callback:
         description: For complete only, the localhost callback URL or code#state from the browser
         type: string
@@ -48,8 +50,8 @@ jobs:
           from urllib.parse import quote
           with open(os.environ['GITHUB_EVENT_PATH']) as source:
               inputs = json.load(source).get('inputs', {})
-          if inputs.get('operation') == 'claude-login-complete':
-              spec = importlib.util.spec_from_file_location('auth', 'scripts/cli-proxy-claude-auth.py')
+          if inputs.get('operation', '').endswith('-login-complete'):
+              spec = importlib.util.spec_from_file_location('auth', 'scripts/cli-proxy-oauth-login.py')
               auth = importlib.util.module_from_spec(spec)
               spec.loader.exec_module(auth)
               try:
@@ -67,14 +69,16 @@ jobs:
           OCI_SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
           OCI_SSH_FINGERPRINT: ${{ secrets.OCI_SSH_FINGERPRINT }}
           OPERATION: ${{ inputs.operation }}
-          CLAUDE_CALLBACK: ${{ inputs.callback }}
+          OAUTH_CALLBACK: ${{ inputs.callback }}
         shell: bash
         run: |
           set -euo pipefail
           case "$OPERATION" in
-            diagnose) command=status ;;
-            claude-login-start) command=start ;;
-            claude-login-complete) command=complete ;;
+            diagnose) command=status provider=claude ;;
+            claude-login-start) command=start provider=claude ;;
+            claude-login-complete) command=complete provider=claude ;;
+            codex-login-start) command=start provider=codex ;;
+            codex-login-complete) command=complete provider=codex ;;
             *) echo 'Unknown operation.' >&2; exit 1 ;;
           esac
           : "${OCI_HOST:?Missing OCI_HOST}" "${OCI_USER:?Missing OCI_USER}" "${OCI_SSH_KEY:?Missing OCI_SSH_KEY}"
@@ -103,24 +107,26 @@ jobs:
           ssh_options=(-i "$key_file" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "UserKnownHostsFile=$hosts_file")
           target="$OCI_USER@$OCI_HOST"
           ssh "${ssh_options[@]}" "$target" 'umask 077; mkdir -p /opt/unified-proxy/.maintenance; chmod 700 /opt/unified-proxy/.maintenance'
-          scp "${ssh_options[@]}" scripts/cli-proxy-claude-auth.py "$target:/opt/unified-proxy/.maintenance/cli-proxy-claude-auth.py"
+          scp "${ssh_options[@]}" scripts/cli-proxy-oauth-login.py "$target:/opt/unified-proxy/.maintenance/cli-proxy-oauth-login.py"
           # %q prevents the callback from becoming shell syntax on the server.
-          printf -v remote 'CLAUDE_CALLBACK=%q python3 /opt/unified-proxy/.maintenance/cli-proxy-claude-auth.py %s' "$CLAUDE_CALLBACK" "$command"
+          printf -v remote 'OAUTH_CALLBACK=%q python3 /opt/unified-proxy/.maintenance/cli-proxy-oauth-login.py %s --provider %s' "$OAUTH_CALLBACK" "$command" "$provider"
           ssh "${ssh_options[@]}" "$target" "$remote"
 
-      - name: Verify Claude with live inference
-        if: inputs.operation == 'claude-login-complete'
+      - name: Verify provider with live inference
+        if: endsWith(inputs.operation, '-login-complete')
         env:
           BASE_URL: https://${{ secrets.PROXY_DOMAIN }}
           PROXY_API_KEY: ${{ secrets.PROXY_API_KEY }}
+          SMOKE_PROVIDER: ${{ startsWith(inputs.operation, 'codex-') && 'gpt' || 'claude' }}
         run: |
           ./scripts/smoke.sh --results "$RUNNER_TEMP/results.json" || true
           python3 - <<'PY'
           import json
           import os
           with open(os.environ['RUNNER_TEMP'] + '/results.json') as handle:
-              claude = json.load(handle)['providers']['claude']
-          if not claude['ok']:
-              raise SystemExit('Claude verification failed: ' + claude['reason'])
-          print('Claude authentication and live inference verified.')
+              provider = os.environ['SMOKE_PROVIDER']
+              result = json.load(handle)['providers'][provider]
+          if not result['ok']:
+              raise SystemExit(provider + ' verification failed: ' + result['reason'])
+          print(provider + ' authentication and live inference verified.')
           PY

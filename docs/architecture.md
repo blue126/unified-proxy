@@ -62,7 +62,7 @@ A model appears in `/v1/models` only while its provider has a usable credential,
 | Secret | Where it lives | Who uses it |
 | --- | --- | --- |
 | Client key `PROXY_API_KEY` | server `upstream-key`, local `.env.secrets`, GitHub secret, clients | clients, smoke and monitor checks |
-| Management key | server `management-key` only | refresh timer (on the server), `cli-proxy-claude-auth.py` (on the server), `reauth.py` (read over SSH into memory) |
+| Management key | server `management-key` only | refresh timer (on the server), `cli-proxy-oauth-login.py` (on the server), `reauth.py` (read over SSH into memory) |
 | Provider OAuth tokens | server `auths/*.json` | CLIProxyAPI; never read by repository tools except the WorkBuddy expiry check |
 | SSH key `OCI_SSH_KEY` | local key file, GitHub secret | deploy, monitor timer check, server maintenance, `reauth.py` |
 | `BARK_KEY` | `.env.secrets`, GitHub secret | monitor alerts |
@@ -118,8 +118,8 @@ The gateway is useful while any provider works, so every automated check treats 
 | `scripts/monitor-notify.py` | Bark alerts from monitor results |
 | `scripts/cli-proxy-refresh-workbuddy.py`, `scripts/cli-proxy-install-refresh.sh`, `systemd/` | WorkBuddy refresh timer |
 | `scripts/reauth.py` | Local re-authentication and credential status for all providers |
-| `scripts/cli-proxy-claude-auth.py` | Server-side Claude login used by the maintenance workflow |
-| `scripts/build-claude-shortcut.py` | Generates the iPhone shortcut that drives the maintenance workflow |
+| `scripts/cli-proxy-oauth-login.py` | Server-side Claude and Codex login used by the maintenance workflow |
+| `scripts/build-reauth-shortcut.py` | Generates the iPhone shortcut that drives the maintenance workflow |
 | `scripts/push-secrets.sh` | Sync `.env.secrets` to GitHub secrets |
 | `scripts/cli-proxy-retire-legacy.py` | One-time retirement of the old Node/LiteLLM stack |
 | `test/` | Unit tests, no network |
