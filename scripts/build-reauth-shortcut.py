@@ -156,6 +156,11 @@ class Shortcut:
         self.action('alert', WFAlertActionTitle=title,
                     WFAlertActionMessage=token_string(*parts), WFAlertActionCancelButtonShown=False)
 
+    def progress(self, message):
+        # A banner does not block the run, and shows how far a stuck run got.
+        self.action('notification', WFNotificationActionTitle='订阅重新认证',
+                    WFNotificationActionBody=token_string(message), WFNotificationActionSound=False)
+
     def stop(self, *parts):
         self.action('output', WFOutput=token_string(self.text(*parts)))
 
@@ -172,12 +177,19 @@ class Shortcut:
         self.stop('未完成')
 
     def dispatch_and_wait(self, operation, code=None):
+        self.progress('正在连接 GitHub')
         self.setvar('PreviousRunID', self.key(self.latest(), 'id'))
         inputs = {'operation': operation}
         if code:
             inputs['callback'] = code
-        self.http(f'{self.api}/workflows/{self.workflow}/dispatches',
-                  {'ref': 'main', 'inputs': inputs})
+        response = self.http(f'{self.api}/workflows/{self.workflow}/dispatches',
+                             {'ref': 'main', 'inputs': inputs})
+        # Success is an empty 204; every GitHub API error carries a message.
+        rejected = self.key(response, 'message')
+        refused = self.conditional(rejected)
+        self.failure(self.text('GitHub 拒绝了维护请求：', rejected))
+        self.endif(refused)
+        self.progress('维护已触发，正在等待 GitHub 开始运行')
         self.setvar('RunID', self.text('pending'))
         self.setvar('RunFinished', self.text('no'))
         discover = self.repeat(12)
@@ -195,6 +207,7 @@ class Shortcut:
         found = self.conditional(variable('RunID'), 'pending')
         self.failure('GitHub 未在 60 秒内返回新的维护运行。请先检查 Actions。')
         self.endif(found)
+        self.progress('维护正在运行，通常需要不到 1 分钟')
         poll = self.repeat(36)
         finished = self.conditional(variable('RunFinished'), 'yes')
         self.otherwise(finished)

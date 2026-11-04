@@ -41,6 +41,16 @@ class ShortcutTests(unittest.TestCase):
         for bad in ('http://localhost:54545/callback?code=a', 'abc#def', 'https://evil.example/auth/callback?code=a'):
             self.assertFalse(pattern.match(bad), bad)
 
+    def test_rejected_dispatch_stops_before_waiting_for_a_run(self):
+        actions = self.workflow['WFWorkflowActions']
+        names = [a['WFWorkflowActionIdentifier'].rsplit('.', 1)[-1] for a in actions]
+        url = next(i for i, a in enumerate(actions) if 'dispatches' in repr(a['WFWorkflowActionParameters'].get('WFURL')))
+        key = actions[url + 1]['WFWorkflowActionParameters']
+        self.assertEqual(key['WFDictionaryKey'], 'message')
+        self.assertEqual(names[url + 2], 'conditional')
+        self.assertLess(names.index('alert', url), names.index('count', url))
+        self.assertIn('GitHub 拒绝了维护请求', self.text)
+
     def test_every_menu_item_has_a_branch(self):
         actions = [a['WFWorkflowActionParameters'] for a in self.workflow['WFWorkflowActions']
                    if a['WFWorkflowActionIdentifier'].endswith('choosefrommenu')]

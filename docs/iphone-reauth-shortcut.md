@@ -65,6 +65,10 @@ Use one login session at a time; do not repeatedly select a “开始浏览器�
 ID before dispatch. Concurrent dispatches by the same actor can still interfere;
 avoid using the web workflow and shortcut simultaneously.
 
+While it runs, the shortcut shows a banner at each stage: connecting to GitHub, run
+requested, and run started. If GitHub rejects the request, it stops and shows
+GitHub's error. If a run looks stuck, the last banner shows how far it got.
+
 The shortcut waits up to one minute to discover a new run and six minutes for it
 to finish. On failure or timeout, it points to Actions and does not claim success
 or automatically resubmit a one-time code. A delayed run may continue on GitHub
